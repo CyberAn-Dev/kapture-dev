@@ -183,6 +183,8 @@ TR = {
     "theme_dark": {"zh": "深色", "en": "Dark"},
     "theme_light": {"zh": "浅色", "en": "Light"},
     "theme_starship": {"zh": "Starship 蓝", "en": "Starship Blue"},
+    "set_theme_preview": {"zh": "选择后立即预览；确定保存，取消还原。",
+                          "en": "Preview on selection; OK saves, Cancel restores."},
     "acc_theme": {"zh": "跟随主题", "en": "Theme default"},
     "acc_indigo": {"zh": "靛蓝紫", "en": "Indigo"},
     "acc_blue": {"zh": "蓝", "en": "Blue"},
@@ -1647,8 +1649,9 @@ class MainWindow(QtWidgets.QWidget):
         self._build_tray_menu()
 
     # --- Selection + capture flow --- #
-    def _refresh_theme_icons(self):
-        theme = self.settings.value("ui_theme", "dark")
+    def _refresh_theme_icons(self, theme=None):
+        if theme is None:
+            theme = self.settings.value("ui_theme", "dark")
         if theme == "system":
             theme = "dark" if system_prefers_dark() else "light"
         colors = THEMES.get(theme, THEMES["dark"])
@@ -1672,14 +1675,15 @@ class MainWindow(QtWidgets.QWidget):
                            QtGui.QIcon.Normal, QtGui.QIcon.On)
             button.setIcon(icon)
 
-    def _apply_style(self):
+    def _apply_style(self, theme=None, accent=None):
         """Apply one complete palette to the editor and its child dialogs."""
         self.setObjectName("root")
-        theme = self.settings.value("ui_theme", "dark")
+        if theme is None:
+            theme = self.settings.value("ui_theme", "dark")
         if theme == "system":
             theme = "dark" if system_prefers_dark() else "light"
         c = THEMES.get(theme, THEMES["dark"])
-        a = self.settings.value("ui_accent", "theme")
+        a = accent if accent is not None else self.settings.value("ui_accent", "theme")
         if a == "theme" or not QtGui.QColor(a).isValid():
             a = c["accent"]
         window, panel, field, editor = (c[k] for k in ("window", "panel", "field", "editor"))
@@ -1776,7 +1780,7 @@ class MainWindow(QtWidgets.QWidget):
             pal.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(panel))
             pal.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(fg))
             app.setPalette(pal)
-        self._refresh_theme_icons()
+        self._refresh_theme_icons(theme)
 
     def handle_command(self, cmd):
         """Single-instance command dispatch: sent from this process or a later-launched process."""
@@ -2287,7 +2291,12 @@ class MainWindow(QtWidgets.QWidget):
             accent.addItem(t(key), hexv)
         accent.setCurrentIndex(max(0, accent.findData(s.value("ui_accent", "theme"))))
         theme.currentIndexChanged.connect(lambda _: accent.setCurrentIndex(0))
+        theme.currentIndexChanged.connect(
+            lambda _: self._apply_style(theme.currentData(), accent.currentData()))
+        accent.currentIndexChanged.connect(
+            lambda _: self._apply_style(theme.currentData(), accent.currentData()))
         uf.addRow(t("set_accent"), accent)
+        uf.addRow(QtWidgets.QLabel(t("set_theme_preview")))
         ui_lang = QtWidgets.QComboBox()
         ui_lang.addItem("中文", "zh"); ui_lang.addItem("English", "en")
         ui_lang.setCurrentIndex(0 if _LANG == "zh" else 1)
@@ -2300,6 +2309,7 @@ class MainWindow(QtWidgets.QWidget):
         outer.addWidget(bb)
 
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            self._apply_style()                      # discard the temporary preview
             return
         # save General / OCR / Recording / Interface
         s.setValue("save_dir", save_dir.text())

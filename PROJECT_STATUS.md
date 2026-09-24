@@ -5,6 +5,7 @@
 - Source installation reuses Ubuntu Python packages through a virtual environment with system package access. pip installs only `mss` and `pytesseract`.
 - The settings dialog works without KDE tools; KDE 5 shortcut integration is shown only when its desktop session and commands are available.
 - The interface has complete dark, light, Starship Blue, and system preference palettes; the settings tabs and their content now use matching colors.
+- Theme and accent selection in the settings dialog previews immediately without changing saved preferences; Cancel restores the saved appearance and OK persists the selection.
 
 ## Completed
 
@@ -14,7 +15,8 @@
 - Verified that the settings dialog opens and saves on Ubuntu GNOME using the locally installed program dependencies.
 - Added a saved appearance selector and theme-default accent option; rounded buttons and themed toolbar icons follow the selected palette.
 - Rendered the settings dialog in dark, light, Starship Blue, and system modes with the installed PyQt5 runtime and checked the resulting images.
-- Updated `/opt/kapture/kapture.py` on this machine and confirmed it matches the repository source. No Kapture process was running at the time; the next launch loads this version.
+- Updated `/opt/kapture/kapture.py` on this machine, confirmed it matches the repository source, and restarted the active user service so the installed process loads this version.
+- Added an offscreen Qt regression test for live theme preview, Cancel restoration, and OK persistence.
 
 ## Blockers and next step
 
