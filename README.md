@@ -112,8 +112,11 @@ cd kapture
 bash install.sh
 ```
 
-The installer uses `apt` to install the **Tesseract engine + Chinese language packs + ffmpeg**,
-creates an isolated **Python virtual environment** with all dependencies, and registers a
+The installer uses `apt` for the **Tesseract engine + Chinese language packs + ffmpeg**
+and for PyQt5, OpenCV, NumPy, Pillow, and pynput. Its virtual environment reuses those
+system packages; `pip` only installs `mss` and `pytesseract`. The launcher ignores user
+site packages so they cannot override the system versions. The `.deb` above is a
+separate upstream package and does not use this script. The installer also registers a
 **Kapture** entry in your application menu.
 
 ## ▶️ Usage

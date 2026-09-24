@@ -303,7 +303,7 @@ def write_desktop_entry(refresh=False):
     locale would override the language chosen inside the app; this way the launcher always follows
     the app's UI language setting.
     """
-    import os, subprocess
+    import os, shutil, subprocess
     d = os.path.expanduser("~/.local/share/applications")
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, "kapture.desktop")
@@ -335,10 +335,13 @@ def write_desktop_entry(refresh=False):
         f.write(content)
     if refresh:
         # Refresh the desktop database and KDE menu cache (in the background, non-blocking)
-        subprocess.Popen(["update-desktop-database", d],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.Popen(["kbuildsycoca5"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if shutil.which("update-desktop-database"):
+            subprocess.Popen(["update-desktop-database", d],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        kde_cache = shutil.which("kbuildsycoca5") or shutil.which("kbuildsycoca6")
+        if kde_cache:
+            subprocess.Popen([kde_cache],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 # (action name, command flag, internal command) -- actions that can be bound to global shortcuts
@@ -349,6 +352,15 @@ SHORTCUT_ACTIONS = [
     ("Manual scrolling capture", "--manual"),
     ("Color picker", "--color"),
 ]
+
+
+def kde_shortcuts_available():
+    """The khotkeys integration below is specific to an active Plasma 5 session."""
+    import os, shutil
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+    return ("KDE" in desktop or "PLASMA" in desktop) and \
+        os.environ.get("KDE_SESSION_VERSION", "5") == "5" and \
+        all(shutil.which(cmd) for cmd in ("kreadconfig5", "kwriteconfig5", "qdbus"))
 
 
 def _kread(group, key, file="khotkeysrc"):
@@ -2082,6 +2094,7 @@ class MainWindow(QtWidgets.QWidget):
     def show_settings(self):
         import os
         s = self.settings
+        shortcuts_available = kde_shortcuts_available()
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(t("set_title"))
         dlg.resize(560, 470)
@@ -2115,7 +2128,7 @@ class MainWindow(QtWidgets.QWidget):
         for name, flag in SHORTCUT_ACTIONS:
             cmd_url = f"{run_sh} {flag}"
             kse = QtWidgets.QKeySequenceEdit()
-            cur = kde_current_key(cmd_url)
+            cur = kde_current_key(cmd_url) if shortcuts_available else ""
             if cur:
                 kse.setKeySequence(QtGui.QKeySequence(cur))
             clr = QtWidgets.QToolButton(); clr.setText("✕")
@@ -2124,7 +2137,8 @@ class MainWindow(QtWidgets.QWidget):
             rw = QtWidgets.QWidget(); rw.setLayout(row)
             kf.addRow(self._action_label(flag), rw)
             key_edits[flag] = (kse, cmd_url, name)
-        tabs.addTab(k, t("tab_shortcuts"))
+        if shortcuts_available:
+            tabs.addTab(k, t("tab_shortcuts"))
 
         # ---------- OCR ---------- #
         o = QtWidgets.QWidget(); of = QtWidgets.QFormLayout(o)
@@ -2198,24 +2212,27 @@ class MainWindow(QtWidgets.QWidget):
         self._apply_style()
         self._retranslate()                          # retranslate the UI immediately
 
-        # write shortcuts to KDE
-        kde_backup_khotkeys()
-        changed = 0
-        for flag, (kse, cmd_url, name) in key_edits.items():
-            key = kse.keySequence().toString(QtGui.QKeySequence.NativeText)
-            key = key.split(",")[0].strip()          # keep only the first key combo
-            uuid_key = f"uuid_{flag}"
-            uid = s.value(uuid_key, "")
-            if not uid:
-                import uuid as _uuid
-                uid = "{" + str(_uuid.uuid4()) + "}"
-                s.setValue(uuid_key, uid)
-            kde_set_shortcut(name, cmd_url, key, uid)
-            changed += 1
-        kde_reload_shortcuts()
-        self.status.setText(
-            (f"Settings saved, {changed} shortcuts written to KDE" if _LANG == "en"
-             else f"设置已保存,{changed} 个快捷键已写入 KDE"))
+        if shortcuts_available:
+            # write shortcuts to KDE
+            kde_backup_khotkeys()
+            changed = 0
+            for flag, (kse, cmd_url, name) in key_edits.items():
+                key = kse.keySequence().toString(QtGui.QKeySequence.NativeText)
+                key = key.split(",")[0].strip()          # keep only the first key combo
+                uuid_key = f"uuid_{flag}"
+                uid = s.value(uuid_key, "")
+                if not uid:
+                    import uuid as _uuid
+                    uid = "{" + str(_uuid.uuid4()) + "}"
+                    s.setValue(uuid_key, uid)
+                kde_set_shortcut(name, cmd_url, key, uid)
+                changed += 1
+            kde_reload_shortcuts()
+            self.status.setText(
+                (f"Settings saved, {changed} shortcuts written to KDE" if _LANG == "en"
+                 else f"设置已保存,{changed} 个快捷键已写入 KDE"))
+        else:
+            self.status.setText(t("st_settings_saved"))
 
     def _action_label(self, flag):
         return t({"--region": "cap_region", "--window": "cap_window",

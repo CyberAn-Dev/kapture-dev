@@ -108,8 +108,10 @@ cd kapture
 bash install.sh
 ```
 
-安装脚本会用 `apt` 安装 **Tesseract 引擎 + 中文语言包 + ffmpeg**，创建独立的
-**Python 虚拟环境**并装好全部依赖，并在应用菜单注册 **Kapture** 图标。
+安装脚本会用 `apt` 安装 **Tesseract 引擎 + 中文语言包 + ffmpeg**，以及 PyQt5、
+OpenCV、NumPy、Pillow、pynput 等 Python 库。虚拟环境复用这些系统库，`pip` 只安装
+`mss` 和 `pytesseract`，并在应用菜单注册 **Kapture** 图标。启动器会忽略用户目录的
+Python 包，避免它们覆盖系统库。上面的 `.deb` 是上游发布的独立安装包，不使用此脚本。
 
 ## ▶️ 使用
 

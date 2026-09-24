@@ -10,14 +10,16 @@ echo "==> 安装目录: $DIR"
 echo "==> 安装系统依赖(需要输入密码)..."
 sudo apt update
 sudo apt install -y tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
-                    python3-venv fonts-noto-cjk ffmpeg
+                    python3-venv python3-pyqt5 python3-opencv python3-numpy \
+                    python3-pil python3-pynput python3-packaging \
+                    fonts-noto-cjk ffmpeg
 
-# 2) Python 虚拟环境 + 依赖(不污染系统 Python)
-echo "==> 创建虚拟环境并安装 Python 依赖..."
-python3 -m venv "$DIR/.venv"
-"$DIR/.venv/bin/python" -m pip install --upgrade pip -q
-"$DIR/.venv/bin/python" -m pip install -q \
-    PyQt5 mss opencv-python-headless numpy pillow pynput pytesseract
+# 2) 复用 apt 安装的 Python 库，仅下载 apt 未提供的两个包
+echo "==> 创建可复用系统库的虚拟环境并安装剩余依赖..."
+python3 -m venv --system-site-packages "$DIR/.venv"
+PYTHONNOUSERSITE=1 "$DIR/.venv/bin/python" -m pip install --no-deps mss pytesseract
+PYTHONNOUSERSITE=1 "$DIR/.venv/bin/python" -c \
+    'import cv2, numpy, PIL, PyQt5, mss, pynput, pytesseract'
 
 # 3) 启动器可执行权限
 chmod +x "$DIR/run.sh" "$DIR/kapture.py"
