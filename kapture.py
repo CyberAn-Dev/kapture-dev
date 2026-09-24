@@ -47,6 +47,46 @@ def bgr_to_qimage(bgr):
 
 ACCENT = "#6c5ce7"          # indigo/purple accent color
 
+THEMES = {
+    "dark": dict(window="#1b1b20", panel="#23232b", field="#2a2a31",
+                 editor="#222228", edge="#3a3a44", text="#e6e6ea",
+                 muted="#c9c9d0", dim="#a2a2ad", hover="#34343e",
+                 pressed="#44444f", accent=ACCENT, on_accent="#ffffff",
+                 icon="#d2d2da"),
+    "light": dict(window="#f5f5f7", panel="#ffffff", field="#ffffff",
+                  editor="#ffffff", edge="#d5d5dc", text="#24242a",
+                  muted="#4b4b56", dim="#686875", hover="#e8e8ed",
+                  pressed="#dcdce3", accent="#007aff", on_accent="#ffffff",
+                  icon="#34343c"),
+    "starship": dict(window="#101827", panel="#172236", field="#1e3049",
+                     editor="#152137", edge="#344966", text="#f0f4ff",
+                     muted="#c6d1e3", dim="#a3b1ca", hover="#29415e",
+                     pressed="#355476", accent="#3b82f6", on_accent="#ffffff",
+                     icon="#dce8fa"),
+}
+
+
+def system_prefers_dark():
+    """Use GNOME's explicit preference when available, otherwise the Qt palette."""
+    import os
+    import subprocess
+    if "GNOME" in os.environ.get("XDG_CURRENT_DESKTOP", "").upper():
+        try:
+            value = subprocess.run(
+                ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+                capture_output=True, text=True, timeout=1, check=True).stdout.strip()
+            if value == "'prefer-dark'":
+                return True
+            if value in ("'default'", "'prefer-light'"):
+                gtk_theme = subprocess.run(
+                    ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
+                    capture_output=True, text=True, timeout=1, check=True).stdout.strip()
+                return value != "'prefer-light'" and "dark" in gtk_theme.lower()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    app = QtWidgets.QApplication.instance()
+    return bool(app and app.palette().color(QtGui.QPalette.Window).lightness() < 128)
+
 # --------------------------------------------------------------------------- #
 # Lightweight i18n
 # --------------------------------------------------------------------------- #
@@ -136,8 +176,14 @@ TR = {
                      "en": "Note: install matching tesseract language data"},
     "set_fps": {"zh": "帧率 (fps)", "en": "Frame rate (fps)"},
     "set_gif": {"zh": "录屏同时导出 GIF", "en": "Also export GIF when recording"},
+    "set_theme": {"zh": "外观主题", "en": "Appearance"},
     "set_accent": {"zh": "强调色", "en": "Accent color"},
     "set_uilang": {"zh": "界面语言", "en": "Interface language"},
+    "theme_system": {"zh": "跟随系统（启动或保存时更新）", "en": "System (updates on launch or save)"},
+    "theme_dark": {"zh": "深色", "en": "Dark"},
+    "theme_light": {"zh": "浅色", "en": "Light"},
+    "theme_starship": {"zh": "Starship 蓝", "en": "Starship Blue"},
+    "acc_theme": {"zh": "跟随主题", "en": "Theme default"},
     "acc_indigo": {"zh": "靛蓝紫", "en": "Indigo"},
     "acc_blue": {"zh": "蓝", "en": "Blue"},
     "acc_teal": {"zh": "青绿", "en": "Teal"},
@@ -823,7 +869,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.color = QtGui.QColor(255, 40, 40)
         self.width = 3
         self.setMouseTracking(True)
-        self.setStyleSheet("background:#222;")
+        self.empty_background = "#222228"
+        self.empty_text = "#a2a2ad"
 
     # --- External interface --- #
     def set_image_bgr(self, bgr):
@@ -896,8 +943,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
         if self.base is None:
-            p.fillRect(self.rect(), QtGui.QColor(34, 34, 34))
-            p.setPen(QtGui.QColor(170, 170, 170))
+            p.fillRect(self.rect(), QtGui.QColor(self.empty_background))
+            p.setPen(QtGui.QColor(self.empty_text))
             p.drawText(self.rect(), Qt.AlignCenter, "No screenshot yet. Use the buttons above to start.")
             return
         p.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -1592,7 +1639,7 @@ class MainWindow(QtWidgets.QWidget):
         self._ocr_lab_lang.setText(t("ocr_lang"))
         self._ocr_lab_layout.setText(t("ocr_layout"))
         self.enhance.setText(t("ocr_enhance"))
-        self.btn_ocr.setIcon(line_icon("ocr"))      # OCR icon follows the language: 字 / OCR
+        self._refresh_theme_icons()                  # OCR icon follows the language: 字 / OCR
         self.text.setPlaceholderText(
             "OCR result will appear here…" if _LANG == "en" else "OCR 识别结果会显示在这里……")
         if not self.status.text() or self.status.text() in (t("st_ready"), "就绪", "Ready"):
@@ -1600,23 +1647,60 @@ class MainWindow(QtWidgets.QWidget):
         self._build_tray_menu()
 
     # --- Selection + capture flow --- #
+    def _refresh_theme_icons(self):
+        theme = self.settings.value("ui_theme", "dark")
+        if theme == "system":
+            theme = "dark" if system_prefers_dark() else "light"
+        colors = THEMES.get(theme, THEMES["dark"])
+        for button, name in (
+                (self.btn_single, "region"), (self.btn_window, "window"),
+                (self.btn_scroll, "scroll"), (self.btn_manual, "manual"),
+                (self.btn_record, "record"), (self.btn_colorpick, "color"),
+                (self.btn_repeat, "repeat"), (self.btn_history, "history"),
+                (self.btn_settings, "settings"), (self.btn_undo, "undo"),
+                (self.btn_clear, "clear"), (self.btn_ocr, "ocr"),
+                (self.btn_copy, "copy"), (self.btn_pin, "pin"),
+                (self.btn_beautify, "beautify"), (self.btn_save, "save")):
+            icon = line_icon(name, colors["icon"])
+            if button.isCheckable():
+                icon.addPixmap(line_icon(name, colors["on_accent"]).pixmap(22, 22),
+                               QtGui.QIcon.Normal, QtGui.QIcon.On)
+            button.setIcon(icon)
+        for name, button in self._tool_btns.items():
+            icon = line_icon(name, colors["icon"])
+            icon.addPixmap(line_icon(name, colors["on_accent"]).pixmap(22, 22),
+                           QtGui.QIcon.Normal, QtGui.QIcon.On)
+            button.setIcon(icon)
+
     def _apply_style(self):
-        """Apply a modern dark theme + accent color (original design; the accent color can be changed in settings)."""
+        """Apply one complete palette to the editor and its child dialogs."""
         self.setObjectName("root")
-        a = self.settings.value("ui_accent", ACCENT)    # default indigo/purple
+        theme = self.settings.value("ui_theme", "dark")
+        if theme == "system":
+            theme = "dark" if system_prefers_dark() else "light"
+        c = THEMES.get(theme, THEMES["dark"])
+        a = self.settings.value("ui_accent", "theme")
+        if a == "theme" or not QtGui.QColor(a).isValid():
+            a = c["accent"]
+        window, panel, field, editor = (c[k] for k in ("window", "panel", "field", "editor"))
+        edge, fg, muted, dim = (c[k] for k in ("edge", "text", "muted", "dim"))
+        hover, pressed, on_accent = (c[k] for k in ("hover", "pressed", "on_accent"))
+        self.canvas.empty_background = editor
+        self.canvas.empty_text = dim
+        self.canvas.update()
         self.setStyleSheet(f"""
-        QWidget#root {{ background:#1b1b20; }}
-        QWidget {{ color:#e6e6ea; font-size:13px; }}
-        QLabel {{ color:#c9c9d0; }}
-        QLabel#dim {{ color:#7e7e89; font-size:12px; }}
+        QWidget#root, QDialog {{ background:{window}; }}
+        QWidget {{ color:{fg}; font-size:13px; }}
+        QLabel {{ color:{muted}; }}
+        QLabel#dim {{ color:{dim}; font-size:12px; }}
 
         /* icon buttons (top bar + toolbar) */
         QToolButton {{
             background:transparent; border:1px solid transparent;
             border-radius:9px; padding:6px;
         }}
-        QToolButton:hover   {{ background:#2f2f39; }}
-        QToolButton:pressed {{ background:#3a3a47; }}
+        QToolButton:hover   {{ background:{hover}; }}
+        QToolButton:pressed {{ background:{pressed}; }}
         QToolButton:checked {{ background:{a}; }}
         QToolButton::menu-button {{ border:none; width:12px; border-top-right-radius:9px;
             border-bottom-right-radius:9px; }}
@@ -1624,54 +1708,75 @@ class MainWindow(QtWidgets.QWidget):
 
         /* normal buttons (dialogs etc.) */
         QPushButton {{
-            background:#2e2e36; color:#e6e6ea;
-            border:1px solid #3a3a44; border-radius:8px; padding:6px 14px;
+            background:{panel}; color:{fg};
+            border:1px solid {edge}; border-radius:10px;
+            padding:7px 16px; min-height:22px;
         }}
-        QPushButton:hover  {{ background:#3a3a45; border-color:#4a4a57; }}
-        QPushButton:pressed{{ background:#44444f; }}
-        QPushButton:default {{ background:{a}; border:none; color:white; }}
+        QPushButton:hover  {{ background:{hover}; border-color:{dim}; }}
+        QPushButton:pressed{{ background:{pressed}; }}
+        QPushButton:default {{ background:{a}; border:1px solid {a}; color:{on_accent}; }}
+        QPushButton:default:hover {{ background:{a}; }}
 
         QComboBox, QSpinBox, QLineEdit {{
-            background:#2a2a31; border:1px solid #3a3a44; border-radius:7px;
+            background:{field}; color:{fg}; border:1px solid {edge}; border-radius:8px;
             padding:4px 8px; min-height:22px; selection-background-color:{a};
         }}
-        QComboBox:hover, QSpinBox:hover, QLineEdit:hover {{ border-color:#55555f; }}
+        QComboBox:hover, QSpinBox:hover, QLineEdit:hover {{ border-color:{dim}; }}
         QComboBox:focus, QSpinBox:focus, QLineEdit:focus {{ border-color:{a}; }}
         QComboBox QAbstractItemView {{
-            background:#26262c; border:1px solid #3a3a44; selection-background-color:{a};
+            background:{panel}; color:{fg}; border:1px solid {edge};
+            selection-background-color:{a}; selection-color:{on_accent};
             outline:0; padding:4px;
         }}
         QComboBox::drop-down {{ border:none; width:18px; }}
 
-        QCheckBox {{ color:#c9c9d0; spacing:6px; }}
+        QCheckBox {{ color:{muted}; spacing:7px; }}
         QCheckBox::indicator {{ width:16px; height:16px; border-radius:5px;
-            border:1px solid #4a4a57; background:#2a2a31; }}
+            border:1px solid {edge}; background:{field}; }}
         QCheckBox::indicator:checked {{ background:{a}; border-color:{a}; }}
 
         QPlainTextEdit, QTextEdit {{
-            background:#222228; border:1px solid #313139; border-radius:10px;
-            padding:8px; color:#dcdce2; selection-background-color:{a};
+            background:{editor}; border:1px solid {edge}; border-radius:10px;
+            padding:8px; color:{fg}; selection-background-color:{a};
         }}
-        QScrollArea {{ border:1px solid #2a2a32; border-radius:12px; background:#141417; }}
+        QScrollArea {{ border:1px solid {edge}; border-radius:12px; background:{editor}; }}
 
         /* tool card + separators */
-        QFrame#card {{ background:#23232b; border:1px solid #303039; border-radius:12px; }}
-        QWidget#vsep {{ background:#34343e; }}
+        QFrame#card {{ background:{panel}; border:1px solid {edge}; border-radius:12px; }}
+        QWidget#vsep {{ background:{edge}; }}
 
         QScrollBar:vertical {{ background:transparent; width:10px; margin:3px; }}
-        QScrollBar::handle:vertical {{ background:#43434d; border-radius:5px; min-height:26px; }}
+        QScrollBar::handle:vertical {{ background:{dim}; border-radius:5px; min-height:26px; }}
         QScrollBar::handle:vertical:hover {{ background:{a}; }}
         QScrollBar:horizontal {{ background:transparent; height:10px; margin:3px; }}
-        QScrollBar::handle:horizontal {{ background:#43434d; border-radius:5px; min-width:26px; }}
+        QScrollBar::handle:horizontal {{ background:{dim}; border-radius:5px; min-width:26px; }}
         QScrollBar::handle:horizontal:hover {{ background:{a}; }}
         QScrollBar::add-line, QScrollBar::sub-line {{ height:0; width:0; }}
 
-        QLabel#status {{ color:#8a8a94; padding:4px 2px; }}
-        QMenu {{ background:#26262c; border:1px solid #3a3a44; padding:6px; border-radius:10px; }}
+        QLabel#status {{ color:{dim}; padding:4px 2px; }}
+        QMenu {{ background:{panel}; color:{fg}; border:1px solid {edge};
+                 padding:6px; border-radius:10px; }}
         QMenu::item {{ padding:7px 22px; border-radius:7px; }}
-        QMenu::item:selected {{ background:{a}; }}
-        QDialog {{ background:#1b1b20; }}
+        QMenu::item:selected {{ background:{a}; color:{on_accent}; }}
+
+        /* all tab surfaces must share the same palette as their labels */
+        QTabWidget::pane {{ background:{panel}; border:1px solid {edge};
+                            border-radius:11px; top:-1px; }}
+        QWidget#settingsPage {{ background:{panel}; }}
+        QTabBar::tab {{ background:{window}; color:{muted};
+                       border:1px solid {edge}; border-bottom:none;
+                       border-top-left-radius:8px; border-top-right-radius:8px;
+                       min-width:58px; padding:8px 12px; margin-right:3px; }}
+        QTabBar::tab:selected {{ background:{panel}; color:{fg}; }}
+        QTabBar::tab:hover:!selected {{ background:{hover}; color:{fg}; }}
         """)
+        app = QtWidgets.QApplication.instance()
+        if app:
+            pal = app.palette()
+            pal.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(panel))
+            pal.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(fg))
+            app.setPalette(pal)
+        self._refresh_theme_icons()
 
     def handle_command(self, cmd):
         """Single-instance command dispatch: sent from this process or a later-launched process."""
@@ -2103,7 +2208,7 @@ class MainWindow(QtWidgets.QWidget):
         outer.addWidget(tabs)
 
         # ---------- General ---------- #
-        g = QtWidgets.QWidget(); gf = QtWidgets.QFormLayout(g)
+        g = QtWidgets.QWidget(); g.setObjectName("settingsPage"); gf = QtWidgets.QFormLayout(g)
         save_dir = QtWidgets.QLineEdit(s.value("save_dir", os.path.expanduser("~/Pictures")))
         browse = QtWidgets.QPushButton(t("set_browse"))
         browse.clicked.connect(lambda: save_dir.setText(
@@ -2121,7 +2226,7 @@ class MainWindow(QtWidgets.QWidget):
         tabs.addTab(g, t("tab_general"))
 
         # ---------- Shortcuts ---------- #
-        k = QtWidgets.QWidget(); kf = QtWidgets.QFormLayout(k)
+        k = QtWidgets.QWidget(); k.setObjectName("settingsPage"); kf = QtWidgets.QFormLayout(k)
         kf.addRow(QtWidgets.QLabel(t("set_sc_hint")))
         run_sh = _run_sh_path()
         key_edits = {}
@@ -2141,7 +2246,7 @@ class MainWindow(QtWidgets.QWidget):
             tabs.addTab(k, t("tab_shortcuts"))
 
         # ---------- OCR ---------- #
-        o = QtWidgets.QWidget(); of = QtWidgets.QFormLayout(o)
+        o = QtWidgets.QWidget(); o.setObjectName("settingsPage"); of = QtWidgets.QFormLayout(o)
         lang = QtWidgets.QComboBox(); lang.addItems(["chi_sim+eng", "chi_sim", "chi_tra+eng", "eng"])
         lang.setCurrentText(s.value("ocr_lang", "chi_sim+eng"))
         psm = QtWidgets.QComboBox()
@@ -2158,7 +2263,7 @@ class MainWindow(QtWidgets.QWidget):
         tabs.addTab(o, t("tab_ocr"))
 
         # ---------- Recording ---------- #
-        r = QtWidgets.QWidget(); rf = QtWidgets.QFormLayout(r)
+        r = QtWidgets.QWidget(); r.setObjectName("settingsPage"); rf = QtWidgets.QFormLayout(r)
         fps = QtWidgets.QSpinBox(); fps.setRange(5, 60); fps.setValue(s.value("record_fps", 15, type=int))
         rf.addRow(t("set_fps"), fps)
         cb_gif = QtWidgets.QCheckBox(t("set_gif")); cb_gif.setChecked(s.value("record_gif", False, type=bool))
@@ -2166,16 +2271,22 @@ class MainWindow(QtWidgets.QWidget):
         tabs.addTab(r, t("tab_record"))
 
         # ---------- Interface ---------- #
-        u = QtWidgets.QWidget(); uf = QtWidgets.QFormLayout(u)
+        u = QtWidgets.QWidget(); u.setObjectName("settingsPage"); uf = QtWidgets.QFormLayout(u)
+        theme = QtWidgets.QComboBox()
+        for key, value in (("theme_system", "system"), ("theme_dark", "dark"),
+                           ("theme_light", "light"), ("theme_starship", "starship")):
+            theme.addItem(t(key), value)
+        theme.setCurrentIndex(max(0, theme.findData(s.value("ui_theme", "dark"))))
+        uf.addRow(t("set_theme"), theme)
         accent = QtWidgets.QComboBox()
-        accents = [("acc_indigo", "#6c5ce7"), ("acc_blue", "#0a84ff"),
+        accents = [("acc_theme", "theme"), ("acc_indigo", "#6c5ce7"),
+                   ("acc_blue", "#0a84ff"),
                    ("acc_teal", "#10b981"), ("acc_orange", "#f59e0b"),
                    ("acc_pink", "#ec4899")]
         for key, hexv in accents:
             accent.addItem(t(key), hexv)
-        cur_acc = s.value("ui_accent", ACCENT)
-        ai = next((i for i, (_, hx) in enumerate(accents) if hx == cur_acc), 0)
-        accent.setCurrentIndex(ai)
+        accent.setCurrentIndex(max(0, accent.findData(s.value("ui_accent", "theme"))))
+        theme.currentIndexChanged.connect(lambda _: accent.setCurrentIndex(0))
         uf.addRow(t("set_accent"), accent)
         ui_lang = QtWidgets.QComboBox()
         ui_lang.addItem("中文", "zh"); ui_lang.addItem("English", "en")
@@ -2201,6 +2312,7 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("ocr_enhance", enh.isChecked())
         s.setValue("record_fps", fps.value())
         s.setValue("record_gif", cb_gif.isChecked())
+        s.setValue("ui_theme", theme.currentData())
         s.setValue("ui_accent", accent.currentData())
         s.setValue("ui_lang", ui_lang.currentData())
         # apply to the current UI

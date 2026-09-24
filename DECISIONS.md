@@ -12,3 +12,10 @@
 - General, OCR, recording, and interface settings remain available without KDE utilities. The KDE 5 shortcut tab and writes are used only in a Plasma 5 session with the required commands.
 - Menu cache refresh commands are optional; a missing KDE utility must not prevent saving unrelated settings.
 - The upstream `.deb` remains independent of this fork's source changes; a new package build is required to distribute the fix through `.deb`.
+
+## Interface themes
+
+- Reuse the existing QSettings and stylesheet path for complete dark, light, and Starship Blue palettes, with a system option resolved from GNOME's color preference or the Qt palette at launch/save time.
+- Keep the original dark look as the default for existing installations. The accent selector defaults to the active theme's accent and resets to that default when the theme changes.
+- Starship configuration specifies ANSI blue, yellow, green, and red without fixed RGB values. The Starship Blue palette is an application interpretation of those colors, not an exact terminal palette copy.
+- Style QTabWidget pane, tabs, and settings pages together so their background and text cannot come from conflicting light and dark palettes.

@@ -73,7 +73,7 @@ line width, plus undo and clear.
 ### ⚙️ Workflow
 - **Global keyboard shortcuts** — bind any capture action system-wide (written straight into KDE).
 - Configurable save folder, filename template, auto-copy / auto-save / open-editor behavior.
-- Accent color themes and a **bilingual UI (中文 / English)**.
+- Switch between dark, light, Starship Blue and system appearance in **Settings → Interface** (system preference is read on launch or when saving settings), with a separate accent color choice and a **bilingual UI (中文 / English)**. Starship Blue follows the prompt's blue color concept rather than the terminal's ANSI palette.
 - Lives quietly in the **system tray**, single-instance.
 
 ## 🖼️ Screenshots
