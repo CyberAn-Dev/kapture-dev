@@ -179,8 +179,14 @@ TR = {
     "set_autosave": {"zh": "截图后自动保存到目录", "en": "Auto-save to folder after capture"},
     "set_openeditor": {"zh": "截图后直接打开编辑器(否则只显示缩略图)",
                        "en": "Open editor after capture (otherwise thumbnail only)"},
-    "set_sc_hint": {"zh": "设置全局快捷键(任意界面可触发,自动写入 KDE):",
-                    "en": "Set global shortcuts (work anywhere, written to KDE):"},
+    "set_start_hidden": {"zh": "启动时在后台运行（通过托盘或快捷键唤起）",
+                         "en": "Start in background (open from tray or shortcut)"},
+    "set_sc_hint": {"zh": "点击输入框后按组合键；清空可停用。快捷键由当前桌面管理。",
+                    "en": "Click a field and press a key combo; clear to disable. Managed by your desktop."},
+    "set_sc_unavailable": {"zh": "当前桌面不支持在 Kapture 中直接注册全局快捷键；可在系统设置中绑定下列命令。",
+                           "en": "This desktop cannot register shortcuts here; bind the commands in system settings."},
+    "set_sc_duplicate": {"zh": "两个功能不能使用同一个快捷键。", "en": "Two actions cannot use the same shortcut."},
+    "set_sc_invalid": {"zh": "此快捷键组合无法注册为全局快捷键。", "en": "This key combination cannot be registered globally."},
     "set_ocr_deflang": {"zh": "默认识别语言", "en": "Default OCR language"},
     "set_ocr_deflayout": {"zh": "默认版面", "en": "Default layout"},
     "set_ocr_enh": {"zh": "图像增强(放大+二值化,提升准确率)",
@@ -416,7 +422,107 @@ SHORTCUT_ACTIONS = [
     ("Auto scrolling capture", "--scroll"),
     ("Manual scrolling capture", "--manual"),
     ("Color picker", "--color"),
+    ("Record screen", "--record"),
+    ("Repeat last area", "--repeat"),
+    ("Show main window", "--show"),
+    ("Open settings", "--settings"),
 ]
+
+
+GNOME_MEDIA_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
+GNOME_CUSTOM_SCHEMA = GNOME_MEDIA_SCHEMA + ".custom-keybinding"
+GNOME_CUSTOM_ROOT = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
+
+
+def shortcut_backend():
+    """Return the desktop shortcut writer available in this session."""
+    import os, shutil
+    if kde_shortcuts_available():
+        return "kde"
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+    if "GNOME" in desktop and shutil.which("gsettings"):
+        return "gnome"
+    return None
+
+
+def gnome_accelerator(sequence):
+    """Convert a single Qt key combination to GNOME's accelerator notation."""
+    if sequence.count() != 1:
+        raise ValueError("one key combination required")
+    combo = int(sequence[0])
+    mods = ((Qt.CTRL, "Control"), (Qt.ALT, "Alt"),
+            (Qt.SHIFT, "Shift"), (Qt.META, "Super"))
+    mod_bits = 0
+    prefix = ""
+    for bit, name in mods:
+        mod_bits |= int(bit)
+        if combo & int(bit):
+            prefix += f"<{name}>"
+    key = QtGui.QKeySequence(combo & ~mod_bits).toString(QtGui.QKeySequence.PortableText)
+    key = {"Esc": "Escape", "Del": "Delete", "Ins": "Insert",
+           "PgUp": "Page_Up", "PgDown": "Page_Down", "Space": "space",
+           "+": "plus", "-": "minus"}.get(key, key)
+    if not key or (not prefix and len(key) == 1):
+        raise ValueError("modifier or special key required")
+    return prefix + (key.lower() if len(key) == 1 else key)
+
+
+def gnome_key_sequence(accelerator):
+    """Display an existing GNOME shortcut in QKeySequenceEdit."""
+    import re
+    mods = re.findall(r"<([^>]+)>", accelerator)
+    key = re.sub(r"^(?:<[^>]+>)*", "", accelerator)
+    mapped = {"Control": "Ctrl", "Primary": "Ctrl", "Alt": "Alt",
+              "Shift": "Shift", "Super": "Meta"}
+    key = {"Escape": "Esc", "Delete": "Del", "Insert": "Ins",
+           "Page_Up": "PgUp", "Page_Down": "PgDown",
+           "space": "Space", "plus": "+", "minus": "-"}.get(key, key)
+    return QtGui.QKeySequence("+".join([*(mapped.get(mod, mod) for mod in mods), key]))
+
+
+def _gsettings(*args):
+    import subprocess
+    try:
+        result = subprocess.run(["gsettings", *args], capture_output=True,
+                                text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(exc.stderr.strip() or str(exc)) from exc
+    return result.stdout.strip()
+
+
+def _gnome_path(flag):
+    return GNOME_CUSTOM_ROOT + "kapture-" + flag.lstrip("-") + "/"
+
+
+def _gnome_paths():
+    import ast
+    value = _gsettings("get", GNOME_MEDIA_SCHEMA, "custom-keybindings")
+    return [] if value == "@as []" else ast.literal_eval(value)
+
+
+def gnome_current_key(flag):
+    import ast
+    path = _gnome_path(flag)
+    if path not in _gnome_paths():
+        return ""
+    return ast.literal_eval(_gsettings("get", f"{GNOME_CUSTOM_SCHEMA}:{path}", "binding"))
+
+
+def gnome_set_shortcuts(entries):
+    """Update only Kapture's GNOME shortcuts; preserve unrelated custom shortcuts."""
+    paths = _gnome_paths()
+    for name, flag, command, key in entries:
+        path = _gnome_path(flag)
+        schema = f"{GNOME_CUSTOM_SCHEMA}:{path}"
+        if key:
+            _gsettings("set", schema, "name", repr("Kapture: " + name))
+            _gsettings("set", schema, "command", repr(command))
+            _gsettings("set", schema, "binding", repr(key))
+            if path not in paths:
+                paths.append(path)
+        elif path in paths:
+            paths.remove(path)
+    _gsettings("set", GNOME_MEDIA_SCHEMA, "custom-keybindings", repr(paths))
 
 
 def kde_shortcuts_available():
@@ -1880,12 +1986,20 @@ class MainWindow(QtWidgets.QWidget):
 
     def handle_command(self, cmd):
         """Single-instance command dispatch: sent from this process or a later-launched process."""
-        if cmd in ("single", "manual", "scroll"):
+        if cmd == "background":
+            self.hide()
+        elif cmd in ("single", "manual", "scroll"):
             self.start_select(cmd)
         elif cmd == "window":
             self.capture_window()
         elif cmd == "color":
             self.pick_color_screen()
+        elif cmd == "record":
+            self.toggle_record()
+        elif cmd == "repeat":
+            self.repeat_last()
+        elif cmd == "settings":
+            self.show_settings()
         else:                                   # show / show-first
             self._blank_editor()                 # don't show the previous screenshot on open
             self.showNormal()
@@ -2308,7 +2422,7 @@ class MainWindow(QtWidgets.QWidget):
     def show_settings(self):
         import os
         s = self.settings
-        shortcuts_available = kde_shortcuts_available()
+        backend = shortcut_backend()
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(t("set_title"))
         dlg.resize(560, 470)
@@ -2330,7 +2444,9 @@ class MainWindow(QtWidgets.QWidget):
         cb_copy = QtWidgets.QCheckBox(t("set_autocopy")); cb_copy.setChecked(s.value("auto_copy", True, type=bool))
         cb_save = QtWidgets.QCheckBox(t("set_autosave")); cb_save.setChecked(s.value("auto_save", False, type=bool))
         cb_edit = QtWidgets.QCheckBox(t("set_openeditor")); cb_edit.setChecked(s.value("open_editor", False, type=bool))
-        for cb in (cb_copy, cb_save, cb_edit):
+        cb_background = QtWidgets.QCheckBox(t("set_start_hidden"))
+        cb_background.setChecked(s.value("start_hidden", False, type=bool))
+        for cb in (cb_copy, cb_save, cb_edit, cb_background):
             gf.addRow(cb)
         tabs.addTab(g, t("tab_general"))
 
@@ -2342,17 +2458,28 @@ class MainWindow(QtWidgets.QWidget):
         for name, flag in SHORTCUT_ACTIONS:
             cmd_url = f"{run_sh} {flag}"
             kse = QtWidgets.QKeySequenceEdit()
-            cur = kde_current_key(cmd_url) if shortcuts_available else ""
+            cur = (kde_current_key(cmd_url) if backend == "kde" else
+                   gnome_current_key(flag) if backend == "gnome" else "")
             if cur:
-                kse.setKeySequence(QtGui.QKeySequence(cur))
+                kse.setKeySequence(gnome_key_sequence(cur) if backend == "gnome"
+                                   else QtGui.QKeySequence(cur))
             clr = QtWidgets.QToolButton(); clr.setText("✕")
             clr.clicked.connect(lambda _, e=kse: e.clear())
             row = QtWidgets.QHBoxLayout(); row.addWidget(kse); row.addWidget(clr)
             rw = QtWidgets.QWidget(); rw.setLayout(row)
             kf.addRow(self._action_label(flag), rw)
             key_edits[flag] = (kse, cmd_url, name)
-        if shortcuts_available:
-            tabs.addTab(k, t("tab_shortcuts"))
+        if backend is None:
+            kf.addRow(QtWidgets.QLabel(t("set_sc_unavailable")))
+            for name, flag in SHORTCUT_ACTIONS:
+                kf.addRow(self._action_label(flag), QtWidgets.QLabel(f"{run_sh} {flag}"))
+            for edit, _, _ in key_edits.values():
+                edit.setEnabled(False)
+        shortcut_scroll = QtWidgets.QScrollArea()
+        shortcut_scroll.setWidgetResizable(True)
+        shortcut_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        shortcut_scroll.setWidget(k)
+        tabs.addTab(shortcut_scroll, t("tab_shortcuts"))
 
         # ---------- OCR ---------- #
         o = QtWidgets.QWidget(); o.setObjectName("settingsPage"); of = QtWidgets.QFormLayout(o)
@@ -2421,12 +2548,54 @@ class MainWindow(QtWidgets.QWidget):
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             self._apply_style()                      # discard the temporary preview
             return
-        # save General / OCR / Recording / Interface
+        if backend:
+            try:
+                keys = {}
+                for flag, (kse, _, _) in key_edits.items():
+                    sequence = kse.keySequence()
+                    portable = sequence.toString(QtGui.QKeySequence.PortableText)
+                    if portable:
+                        if portable in keys:
+                            raise ValueError(t("set_sc_duplicate"))
+                        keys[portable] = flag
+                        if backend == "gnome":
+                            gnome_accelerator(sequence)
+                        elif sequence.count() != 1:
+                            raise ValueError(t("set_sc_invalid"))
+                if backend == "gnome":
+                    gnome_set_shortcuts([
+                        (name, flag, cmd_url, gnome_accelerator(kse.keySequence())
+                         if not kse.keySequence().isEmpty() else "")
+                        for flag, (kse, cmd_url, name) in key_edits.items()])
+                else:
+                    kde_backup_khotkeys()
+                    for flag, (kse, cmd_url, name) in key_edits.items():
+                        key = kse.keySequence().toString(QtGui.QKeySequence.NativeText)
+                        uuid_key = f"uuid_{flag}"
+                        uid = s.value(uuid_key, "")
+                        if not uid:
+                            import uuid as _uuid
+                            uid = "{" + str(_uuid.uuid4()) + "}"
+                            s.setValue(uuid_key, uid)
+                        kde_set_shortcut(name, cmd_url, key, uid)
+                    kde_reload_shortcuts()
+            except (ValueError, OSError, RuntimeError) as exc:
+                self._apply_style()
+                QtWidgets.QMessageBox.warning(self, t("tab_shortcuts"),
+                                              str(exc) or t("set_sc_invalid"))
+                return
+            self.status.setText(
+                (f"Settings saved, {len(keys)} shortcuts active on {backend.upper()}"
+                 if _LANG == "en" else f"设置已保存，{len(keys)} 个快捷键已在 {backend.upper()} 启用"))
+        else:
+            self.status.setText(t("st_settings_saved"))
+        # Save other preferences only after shortcuts have been validated and written.
         s.setValue("save_dir", save_dir.text())
         s.setValue("name_tmpl", tmpl.text())
         s.setValue("auto_copy", cb_copy.isChecked())
         s.setValue("auto_save", cb_save.isChecked())
         s.setValue("open_editor", cb_edit.isChecked())
+        s.setValue("start_hidden", cb_background.isChecked())
         s.setValue("ocr_lang", lang.currentText())
         s.setValue("ocr_psm", psm.currentData())
         s.setValue("ocr_enhance", enh.isChecked())
@@ -2436,41 +2605,20 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("ui_theme", theme.currentData())
         s.setValue("ui_accent", accent.currentData())
         s.setValue("ui_lang", ui_lang.currentData())
-        # apply to the current UI
         self.lang.setCurrentText(lang.currentText())
         self.psm.setCurrentIndex(self.psm.findData(psm.currentData()))
         self.enhance.setChecked(enh.isChecked())
-        set_lang(ui_lang.currentData())              # switch UI language
-        write_desktop_entry(refresh=True)            # update launcher name/comment for the language
+        set_lang(ui_lang.currentData())
+        write_desktop_entry(refresh=True)
         self._apply_style()
-        self._retranslate()                          # retranslate the UI immediately
-
-        if shortcuts_available:
-            # write shortcuts to KDE
-            kde_backup_khotkeys()
-            changed = 0
-            for flag, (kse, cmd_url, name) in key_edits.items():
-                key = kse.keySequence().toString(QtGui.QKeySequence.NativeText)
-                key = key.split(",")[0].strip()          # keep only the first key combo
-                uuid_key = f"uuid_{flag}"
-                uid = s.value(uuid_key, "")
-                if not uid:
-                    import uuid as _uuid
-                    uid = "{" + str(_uuid.uuid4()) + "}"
-                    s.setValue(uuid_key, uid)
-                kde_set_shortcut(name, cmd_url, key, uid)
-                changed += 1
-            kde_reload_shortcuts()
-            self.status.setText(
-                (f"Settings saved, {changed} shortcuts written to KDE" if _LANG == "en"
-                 else f"设置已保存,{changed} 个快捷键已写入 KDE"))
-        else:
-            self.status.setText(t("st_settings_saved"))
+        self._retranslate()
 
     def _action_label(self, flag):
         return t({"--region": "cap_region", "--window": "cap_window",
                   "--scroll": "cap_scroll", "--manual": "cap_manual",
-                  "--color": "cap_color"}.get(flag, "cap_region"))
+                  "--color": "cap_color", "--record": "cap_record",
+                  "--repeat": "cap_repeat", "--show": "tray_show",
+                  "--settings": "t_settings"}.get(flag, "cap_region"))
 
     def show_history(self):
         if not self.history:
@@ -2612,12 +2760,21 @@ def main():
     parser.add_argument("--scroll", action="store_true", help="go straight to auto scrolling capture on launch")
     parser.add_argument("--window", action="store_true", help="go straight to window capture on launch")
     parser.add_argument("--color", action="store_true", help="go straight to screen color picking on launch")
+    parser.add_argument("--record", action="store_true", help="start or stop screen recording")
+    parser.add_argument("--repeat", action="store_true", help="repeat the last selected area")
+    parser.add_argument("--show", action="store_true", help="show the main window")
+    parser.add_argument("--settings", action="store_true", help="open settings")
+    parser.add_argument("--background", action="store_true", help="keep running with the main window hidden")
     cli, _ = parser.parse_known_args()
     cmd = ("single" if cli.region else
            "manual" if cli.manual else
            "scroll" if cli.scroll else
            "window" if cli.window else
-           "color" if cli.color else "show")
+           "color" if cli.color else
+           "record" if cli.record else
+           "repeat" if cli.repeat else
+           "settings" if cli.settings else
+           "background" if cli.background else "show")
 
     # Single instance: if one is already running, send it the command and exit; never spawn a second process
     probe = QLocalSocket()
@@ -2669,7 +2826,10 @@ def main():
         c.disconnectFromServer()
     server.newConnection.connect(on_conn)
 
-    win.handle_command(cmd if cmd != "show" else "show-first")
+    initial = ("background" if cmd == "show" and
+               win.settings.value("start_hidden", False, type=bool) and not cli.show
+               else cmd)
+    win.handle_command(initial)
     sys.exit(app.exec_())
 
 

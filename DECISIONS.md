@@ -9,9 +9,10 @@
 
 ## Settings on non-KDE desktops
 
-- General, OCR, recording, and interface settings remain available without KDE utilities. The KDE 5 shortcut tab and writes are used only in a Plasma 5 session with the required commands.
+- General, OCR, recording, and interface settings remain available without KDE utilities. The shortcut page uses GNOME custom keybindings in GNOME sessions, KHotKeys in supported Plasma 5 sessions, and displays manual command lines elsewhere.
 - Menu cache refresh commands are optional; a missing KDE utility must not prevent saving unrelated settings.
 - The upstream `.deb` remains independent of this fork's source changes; a new package build is required to distribute the fix through `.deb`.
+- Reuse the existing action command line, single-instance socket, tray, and QSettings for shortcut dispatch and a start-hidden preference. GNOME writes only Kapture's custom-keybinding paths and preserves unrelated bindings; a scroll area keeps all actions accessible in the settings dialog.
 
 ## Interface themes
 

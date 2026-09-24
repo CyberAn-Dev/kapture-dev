@@ -71,7 +71,7 @@ line width, plus button or **Ctrl+Z** undo and clear.
 - **🕘 History** of recent captures.
 
 ### ⚙️ Workflow
-- **Global keyboard shortcuts** — bind any capture action system-wide (written straight into KDE).
+- **Global keyboard shortcuts** — assign key combinations to capture, recording, repeat-area, and show-window actions in Settings on GNOME or KDE Plasma 5.
 - Configurable save folder, filename template, auto-copy / auto-save / open-editor behavior.
 - Switch between dark, light, Starship Blue, [One Dark Pro Darker](https://github.com/Binaryify/OneDark-Pro/blob/master/themes/OneDark-Pro-darker.json), [Vitesse Dark](https://github.com/antfu/vscode-theme-vitesse/blob/main/themes/vitesse-dark.json), and system appearance in **Settings → Interface** (system preference is read on launch or when saving settings), with a separate accent color choice and a **bilingual UI (中文 / English)**. Selection previews immediately; OK saves it and Cancel restores the previous appearance. The two new palettes adapt their upstream colors to Kapture's controls; Starship Blue follows the prompt's blue color concept rather than the terminal's ANSI palette.
 - Capture, options, history, and settings are visually grouped; annotation and output actions use separate rows so every button remains visible at the default window width.
@@ -125,7 +125,8 @@ separate upstream package and does not use this script. The installer also regis
 
 - Search **Kapture** in your application menu, **or** run `./run.sh` from the terminal.
 - Kapture runs as a single instance and lives in the **system tray** (right-click to quit).
-- Bind **global shortcuts** in ⚙ **Settings → Shortcuts** — they are written to KDE automatically.
+- Closing the main window leaves Kapture in the **system tray**. Enable **Settings → General → Start in background** to hide the window on the next launch; use the tray or `./run.sh --show` to reopen it.
+- In ⚙ **Settings → Shortcuts**, click a field, press a key combination, and save. ✕ clears a binding. GNOME stores these as custom shortcuts; KDE Plasma 5 uses KHotKeys. Resolve any existing system shortcut conflict in desktop Keyboard settings.
 
 ### Command line
 
@@ -137,6 +138,11 @@ separate upstream package and does not use this script. The installer also regis
 ./run.sh --scroll    # auto scrolling long screenshot
 ./run.sh --manual    # manual scrolling long screenshot
 ./run.sh --color     # screen color picker
+./run.sh --record    # start or stop recording
+./run.sh --repeat    # repeat last capture area
+./run.sh --show      # show the main window
+./run.sh --settings  # open settings
+./run.sh --background # hide the main window and keep running
 ```
 
 ## 💡 Tips for scrolling capture
@@ -173,7 +179,7 @@ Yes, Kapture is open source under the **MIT License**.
 
 **Which desktops are supported?**
 Built and tested on **Kubuntu / Ubuntu / KDE Plasma** on X11. Other X11 desktops likely work;
-the global-shortcut writer is KDE-specific.
+the global-shortcut writer supports GNOME and KDE Plasma 5; other desktops can bind the command-line actions in their keyboard settings.
 
 ## 🤝 Contributing
 
