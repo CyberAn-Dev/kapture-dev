@@ -70,7 +70,8 @@
 ### ⚙️ 工作流
 - **全局快捷键** —— 把任意截图动作绑定为系统级快捷键（自动写入 KDE）。
 - 可配置保存目录、文件名模板、截图后自动复制 / 自动保存 / 直接打开编辑器。
-- 可在 **设置 → 界面** 切换深色、浅色、Starship 蓝或跟随系统（启动与保存设置时更新），并单独选择强调色；选择后立即预览，点“确定”保存，点“取消”还原。支持**中 / 英双语界面**。Starship 蓝参考当前提示符的蓝色语义，不依赖终端的 ANSI 调色板。
+- 可在 **设置 → 界面** 切换深色、浅色、Starship 蓝、[One Dark Pro Darker](https://github.com/Binaryify/OneDark-Pro/blob/master/themes/OneDark-Pro-darker.json)、[Vitesse Dark](https://github.com/antfu/vscode-theme-vitesse/blob/main/themes/vitesse-dark.json) 或跟随系统（启动与保存设置时更新），并单独选择强调色；选择后立即预览，点“确定”保存，点“取消”还原。支持**中 / 英双语界面**。新增两套主题按原项目配色适配 Kapture 控件；Starship 蓝参考当前提示符的蓝色语义，不依赖终端的 ANSI 调色板。
+- 主工具区将截图、选项、历史与设置分组；标注和输出分成两行，默认窗口宽度下各功能按钮保持可见。
 - 常驻**系统托盘**，单实例运行。
 
 ## 🖼️ 软件截图

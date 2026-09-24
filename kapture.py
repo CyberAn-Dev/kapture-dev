@@ -63,6 +63,18 @@ THEMES = {
                      muted="#c6d1e3", dim="#a3b1ca", hover="#29415e",
                      pressed="#355476", accent="#3b82f6", on_accent="#ffffff",
                      icon="#dce8fa"),
+    "one_dark_pro_darker": dict(
+        window="#1e2227", panel="#23272e", field="#2c313c",
+        editor="#23272e", edge="#3e4452", text="#d7dae0",
+        muted="#abb2bf", dim="#9da5b4", hover="#323842",
+        pressed="#404754", accent="#4d78cc", on_accent="#f8fafd",
+        icon="#d7dae0"),
+    "vitesse_dark": dict(
+        window="#121212", panel="#181818", field="#181818",
+        editor="#121212", edge="#2f363d", text="#dbd7ca",
+        muted="#bfbaaa", dim="#959da5", hover="#242424",
+        pressed="#2f363d", accent="#4d9375", on_accent="#121212",
+        icon="#dbd7ca"),
 }
 
 
@@ -124,6 +136,7 @@ TR = {
     "lab_delay": {"zh": "延时", "en": "Delay"},
     "lab_speed": {"zh": "滚速", "en": "Speed"},
     "lab_width": {"zh": "线宽", "en": "Width"},
+    "lab_output": {"zh": "输出", "en": "Output"},
     # Annotation
     "a_rect": {"zh": "矩形", "en": "Rectangle"},
     "a_ellipse": {"zh": "椭圆", "en": "Ellipse"},
@@ -183,6 +196,8 @@ TR = {
     "theme_dark": {"zh": "深色", "en": "Dark"},
     "theme_light": {"zh": "浅色", "en": "Light"},
     "theme_starship": {"zh": "Starship 蓝", "en": "Starship Blue"},
+    "theme_one_dark_pro_darker": {"zh": "One Dark Pro Darker", "en": "One Dark Pro Darker"},
+    "theme_vitesse_dark": {"zh": "Vitesse Dark", "en": "Vitesse Dark"},
     "set_theme_preview": {"zh": "选择后立即预览；确定保存，取消还原。",
                           "en": "Preview on selection; OK saves, Cancel restores."},
     "acc_theme": {"zh": "跟随主题", "en": "Theme default"},
@@ -1468,6 +1483,7 @@ class MainWindow(QtWidgets.QWidget):
         b = QtWidgets.QToolButton()
         b.setIcon(line_icon(icon))
         b.setIconSize(QtCore.QSize(22, 22))
+        b.setFixedSize(36, 36)
         b.setToolTip(tip)
         b.setCheckable(checkable)
         b.setAutoRaise(True)
@@ -1481,46 +1497,56 @@ class MainWindow(QtWidgets.QWidget):
         w.setFixedWidth(1)
         return w
 
+    def _toolbar_group(self, widgets):
+        group = QtWidgets.QFrame()
+        group.setObjectName("toolbarGroup")
+        row = QtWidgets.QHBoxLayout(group)
+        row.setContentsMargins(6, 3, 6, 3)
+        row.setSpacing(4)
+        for widget in widgets:
+            row.addWidget(widget)
+        return group
+
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 8)
         layout.setSpacing(10)
 
-        # ---------- Minimal top bar: capture features ---------- #
-        top = QtWidgets.QHBoxLayout(); top.setSpacing(4)
+        # ---------- Capture, capture options, and window actions ---------- #
+        top = QtWidgets.QHBoxLayout(); top.setSpacing(8)
         self.btn_single = self._tbtn("region", "")
+        self.btn_single.setObjectName("primaryCapture")
         self.btn_window = self._tbtn("window", "")
         self.btn_scroll = self._tbtn("scroll", "")
         self.btn_manual = self._tbtn("manual", "")
         self.btn_record = self._tbtn("record", "")
-        for b in (self.btn_single, self.btn_window, self.btn_scroll,
-                  self.btn_manual, self.btn_record):
-            top.addWidget(b)
-        top.addWidget(self._vsep())
+        top.addWidget(self._toolbar_group((self.btn_single, self.btn_window,
+                                           self.btn_scroll, self.btn_manual,
+                                           self.btn_record)))
         self.btn_colorpick = self._tbtn("color", "")
         self.btn_repeat = self._tbtn("repeat", "")
-        top.addWidget(self.btn_colorpick); top.addWidget(self.btn_repeat)
-        top.addWidget(self._vsep())
         self._lab_delay = QtWidgets.QLabel(); self._lab_delay.setObjectName("dim")
-        top.addWidget(self._lab_delay)
         self.delay = QtWidgets.QSpinBox(); self.delay.setRange(0, 10)
         self.delay.setFixedWidth(50)
-        top.addWidget(self.delay)
         self._lab_speed = QtWidgets.QLabel(); self._lab_speed.setObjectName("dim")
-        top.addWidget(self._lab_speed)
         self.speed = QtWidgets.QSpinBox(); self.speed.setRange(1, 10)
         self.speed.setValue(3); self.speed.setFixedWidth(50)
-        top.addWidget(self.speed)
+        top.addWidget(self._toolbar_group((self.btn_colorpick, self.btn_repeat,
+                                           self._vsep(), self._lab_delay, self.delay,
+                                           self._lab_speed, self.speed)))
         top.addStretch(1)
         self.btn_history = self._tbtn("history", "")
         self.btn_settings = self._tbtn("settings", "")
-        top.addWidget(self.btn_history); top.addWidget(self.btn_settings)
+        top.addWidget(self._toolbar_group((self.btn_history, self.btn_settings)))
         layout.addLayout(top)
 
-        # ---------- Tool card: annotation + OCR/export ---------- #
+        # ---------- Annotation tools and output actions ---------- #
         card = QtWidgets.QFrame(); card.setObjectName("card")
-        tools = QtWidgets.QHBoxLayout(card)
-        tools.setContentsMargins(8, 6, 8, 6); tools.setSpacing(3)
+        card_layout = QtWidgets.QVBoxLayout(card)
+        card_layout.setContentsMargins(8, 6, 8, 6)
+        card_layout.setSpacing(5)
+        tools = QtWidgets.QHBoxLayout(); tools.setSpacing(3)
+        card_layout.addLayout(tools)
         self.tool_group = QtWidgets.QButtonGroup(self)
         self._tool_btns = {}
         for name in ["rect", "ellipse", "arrow", "line", "pen", "text",
@@ -1534,9 +1560,11 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_color = QtWidgets.QToolButton()
         self.btn_color.setIcon(swatch_icon(QtGui.QColor(255, 40, 40)))
         self.btn_color.setIconSize(QtCore.QSize(20, 20))
+        self.btn_color.setFixedSize(36, 36)
         self.btn_color.setAutoRaise(True)
         self.btn_color.setCursor(Qt.PointingHandCursor)
         self.btn_color.clicked.connect(self.pick_color)
+        tools.addWidget(self._vsep())
         tools.addWidget(self.btn_color)
         self.lwidth = QtWidgets.QSpinBox(); self.lwidth.setRange(1, 30)
         self.lwidth.setValue(3); self.lwidth.setFixedWidth(50)
@@ -1546,13 +1574,25 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_undo.clicked.connect(lambda: self.canvas.undo())
         self.btn_clear = self._tbtn("clear", "")
         self.btn_clear.clicked.connect(lambda: self.canvas.clear_items())
-        tools.addWidget(self.btn_undo); tools.addWidget(self.btn_clear)
         tools.addStretch(1)
         tools.addWidget(self._vsep())
+        tools.addWidget(self.btn_undo); tools.addWidget(self.btn_clear)
+
+        divider = QtWidgets.QFrame()
+        divider.setObjectName("toolbarDivider")
+        divider.setFixedHeight(1)
+        card_layout.addWidget(divider)
+        exports = QtWidgets.QHBoxLayout(); exports.setSpacing(3)
+        self._output_label = QtWidgets.QLabel(t("lab_output"))
+        self._output_label.setObjectName("dim")
+        exports.addWidget(self._output_label)
+        exports.addStretch(1)
+        card_layout.addLayout(exports)
 
         # OCR: main button runs recognition; dropdown arrow adjusts language/layout/enhancement
         self.btn_ocr = QtWidgets.QToolButton()
         self.btn_ocr.setIcon(line_icon("ocr")); self.btn_ocr.setIconSize(QtCore.QSize(22, 22))
+        self.btn_ocr.setFixedHeight(36)
         self.btn_ocr.setAutoRaise(True); self.btn_ocr.setCursor(Qt.PointingHandCursor)
         self.btn_ocr.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         ocr_menu = QtWidgets.QMenu(self.btn_ocr)
@@ -1583,7 +1623,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_save = self._tbtn("save", "")
         for b in (self.btn_ocr, self.btn_copy, self.btn_pin,
                   self.btn_beautify, self.btn_save):
-            tools.addWidget(b)
+            exports.addWidget(b)
         layout.addWidget(card)
 
         # ---------- Canvas ---------- #
@@ -1637,6 +1677,7 @@ class MainWindow(QtWidgets.QWidget):
             b.setToolTip(t("a_" + name))
         self._lab_delay.setText(t("lab_delay"))
         self._lab_speed.setText(t("lab_speed"))
+        self._output_label.setText(t("lab_output"))
         self.lwidth.setToolTip(t("lab_width"))
         self._ocr_lab_lang.setText(t("ocr_lang"))
         self._ocr_lab_layout.setText(t("ocr_layout"))
@@ -1664,7 +1705,8 @@ class MainWindow(QtWidgets.QWidget):
                 (self.btn_clear, "clear"), (self.btn_ocr, "ocr"),
                 (self.btn_copy, "copy"), (self.btn_pin, "pin"),
                 (self.btn_beautify, "beautify"), (self.btn_save, "save")):
-            icon = line_icon(name, colors["icon"])
+            icon = line_icon(name, colors["on_accent"] if button is self.btn_single
+                             else colors["icon"])
             if button.isCheckable():
                 icon.addPixmap(line_icon(name, colors["on_accent"]).pixmap(22, 22),
                                QtGui.QIcon.Normal, QtGui.QIcon.On)
@@ -1706,6 +1748,8 @@ class MainWindow(QtWidgets.QWidget):
         QToolButton:hover   {{ background:{hover}; }}
         QToolButton:pressed {{ background:{pressed}; }}
         QToolButton:checked {{ background:{a}; }}
+        QToolButton#primaryCapture {{ background:{a}; border:1px solid {a}; }}
+        QToolButton#primaryCapture:hover {{ border-color:{on_accent}; }}
         QToolButton::menu-button {{ border:none; width:12px; border-top-right-radius:9px;
             border-bottom-right-radius:9px; }}
         QToolButton::menu-arrow {{ width:0; height:0; image:none; }}
@@ -1747,6 +1791,8 @@ class MainWindow(QtWidgets.QWidget):
 
         /* tool card + separators */
         QFrame#card {{ background:{panel}; border:1px solid {edge}; border-radius:12px; }}
+        QFrame#toolbarGroup {{ background:{panel}; border:1px solid {edge}; border-radius:12px; }}
+        QFrame#toolbarDivider {{ background:{edge}; border:none; }}
         QWidget#vsep {{ background:{edge}; }}
 
         QScrollBar:vertical {{ background:transparent; width:10px; margin:3px; }}
@@ -2278,7 +2324,9 @@ class MainWindow(QtWidgets.QWidget):
         u = QtWidgets.QWidget(); u.setObjectName("settingsPage"); uf = QtWidgets.QFormLayout(u)
         theme = QtWidgets.QComboBox()
         for key, value in (("theme_system", "system"), ("theme_dark", "dark"),
-                           ("theme_light", "light"), ("theme_starship", "starship")):
+                           ("theme_light", "light"), ("theme_starship", "starship"),
+                           ("theme_one_dark_pro_darker", "one_dark_pro_darker"),
+                           ("theme_vitesse_dark", "vitesse_dark")):
             theme.addItem(t(key), value)
         theme.setCurrentIndex(max(0, theme.findData(s.value("ui_theme", "dark"))))
         uf.addRow(t("set_theme"), theme)
