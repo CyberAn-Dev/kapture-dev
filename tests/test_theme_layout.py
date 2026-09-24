@@ -52,6 +52,7 @@ class ThemeLayoutTest(unittest.TestCase):
                 self.app.processEvents()
                 actual = self.window.grab().toImage().pixelColor(10, 10).name()
                 self.assertEqual(actual, expected)
+            dialog.close()
             return QtWidgets.QDialog.Rejected
 
         with mock.patch.object(QtWidgets.QDialog, "exec_", inspect):

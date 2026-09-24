@@ -18,7 +18,7 @@ class ThemePreviewTest(unittest.TestCase):
     def setUpClass(cls):
         cls.config_dir = tempfile.TemporaryDirectory()
         os.environ["XDG_CONFIG_HOME"] = cls.config_dir.name
-        cls.app = QtWidgets.QApplication([])
+        cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
         cls.app.setStyle("Fusion")
 
     @classmethod
@@ -58,6 +58,7 @@ class ThemePreviewTest(unittest.TestCase):
             self.assertEqual(dialog.grab().toImage().pixelColor(200, 200).name(),
                              "#ffffff")
             self.assertEqual(self.window.settings.value("ui_theme"), "dark")
+            dialog.close()
             return result
 
         result = QtWidgets.QDialog.Rejected

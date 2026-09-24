@@ -56,12 +56,12 @@ If you have been looking for a Linux alternative to Snipaste, ShareX, Flameshot,
 ### 🖍️ Annotate
 Rectangle · Ellipse · Arrow · Line · Pen · Text · **Numbered steps** · Highlight ·
 **Blur / mosaic** (hide sensitive info) · **Magnifier** · Crop — with adjustable color &
-line width, plus undo and clear.
+line width, plus button or **Ctrl+Z** undo and clear.
 
 ### 🔤 OCR (text recognition)
 - Powered by **Tesseract**, recognizes **Simplified / Traditional Chinese and English**.
 - Layout modes (block / auto / single column / single line) and an image-enhance toggle for accuracy.
-- Extracted text is **copied to the clipboard** automatically.
+- OCR runs in the background after a capture by default, opens the editor, and displays the result; disable it in **Settings → OCR**. Automatic OCR keeps the captured image on the clipboard. Clicking the OCR button manually copies recognized text to the clipboard.
 
 ### 🎬 Output & share
 - **Auto-copy to clipboard** after capture, with a floating thumbnail in the corner.
@@ -75,6 +75,7 @@ line width, plus undo and clear.
 - Configurable save folder, filename template, auto-copy / auto-save / open-editor behavior.
 - Switch between dark, light, Starship Blue, [One Dark Pro Darker](https://github.com/Binaryify/OneDark-Pro/blob/master/themes/OneDark-Pro-darker.json), [Vitesse Dark](https://github.com/antfu/vscode-theme-vitesse/blob/main/themes/vitesse-dark.json), and system appearance in **Settings → Interface** (system preference is read on launch or when saving settings), with a separate accent color choice and a **bilingual UI (中文 / English)**. Selection previews immediately; OK saves it and Cancel restores the previous appearance. The two new palettes adapt their upstream colors to Kapture's controls; Starship Blue follows the prompt's blue color concept rather than the terminal's ANSI palette.
 - Capture, options, history, and settings are visually grouped; annotation and output actions use separate rows so every button remains visible at the default window width.
+- Output actions start beside the Output label. Ctrl+Z undoes annotations in the editor and text edits when the OCR result box has focus.
 - Lives quietly in the **system tray**, single-instance.
 
 ## 🖼️ Screenshots

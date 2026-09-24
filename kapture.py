@@ -150,7 +150,7 @@ TR = {
     "a_magnify": {"zh": "放大镜", "en": "Magnifier"},
     "a_crop": {"zh": "裁剪", "en": "Crop"},
     "a_color": {"zh": "标注颜色", "en": "Annotation color"},
-    "a_undo": {"zh": "撤销", "en": "Undo"},
+    "a_undo": {"zh": "撤销（Ctrl+Z）", "en": "Undo (Ctrl+Z)"},
     "a_clear": {"zh": "清除标注", "en": "Clear annotations"},
     # Export
     "e_ocr": {"zh": "OCR 提取文字", "en": "OCR extract text"},
@@ -185,6 +185,8 @@ TR = {
     "set_ocr_deflayout": {"zh": "默认版面", "en": "Default layout"},
     "set_ocr_enh": {"zh": "图像增强(放大+二值化,提升准确率)",
                     "en": "Image enhance (upscale + threshold, better accuracy)"},
+    "set_autoocr": {"zh": "截图后自动 OCR（打开编辑器并显示结果）",
+                    "en": "Run OCR after capture (open editor and show text)"},
     "set_ocr_note": {"zh": "提示:中文需已安装对应 tesseract 语言包",
                      "en": "Note: install matching tesseract language data"},
     "set_fps": {"zh": "帧率 (fps)", "en": "Frame rate (fps)"},
@@ -1461,6 +1463,42 @@ class RecordBar(QtWidgets.QWidget):
 # --------------------------------------------------------------------------- #
 # Main window
 # --------------------------------------------------------------------------- #
+class OCRWorker(QThread):
+    result = pyqtSignal(str, str)     # recognized text, or an error message
+
+    def __init__(self, img, lang, psm, enhance, automatic, parent=None):
+        super().__init__(parent)
+        self.img = img.copy()
+        self.lang = lang
+        self.psm = psm
+        self.enhance = enhance
+        self.automatic = automatic
+
+    def run(self):
+        try:
+            import pytesseract
+        except ImportError:
+            self.result.emit("", "pytesseract not installed")
+            return
+        try:
+            if self.enhance:
+                pil = Image.fromarray(preprocess_for_ocr(self.img))
+            else:
+                pil = Image.fromarray(cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB))
+            config = f"--oem 1 --psm {self.psm} -c preserve_interword_spaces=1 --dpi 150"
+            txt = pytesseract.image_to_string(
+                pil, lang=self.lang, config=config, timeout=20 if self.automatic else 0)
+        except pytesseract.TesseractNotFoundError:
+            self.result.emit("", "tesseract not found; run: apt install tesseract-ocr")
+            return
+        except Exception as exc:                      # noqa: BLE001
+            self.result.emit("", f"OCR error: {exc} (language pack may be missing)")
+            return
+        if "chi" in self.lang:
+            txt = _strip_cjk_spaces(txt)
+        self.result.emit(txt, "")
+
+
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -1474,6 +1512,8 @@ class MainWindow(QtWidgets.QWidget):
         write_desktop_entry()                               # launcher name follows the language
         self.history = []            # recent screenshots [(QImage, description)]
         self._recorder = None        # screen recorder
+        self._ocr_workers = []
+        self._ocr_serial = 0
         self._build_ui()
         self._apply_style()
         self._setup_tray()
@@ -1586,7 +1626,6 @@ class MainWindow(QtWidgets.QWidget):
         self._output_label = QtWidgets.QLabel(t("lab_output"))
         self._output_label.setObjectName("dim")
         exports.addWidget(self._output_label)
-        exports.addStretch(1)
         card_layout.addLayout(exports)
 
         # OCR: main button runs recognition; dropdown arrow adjusts language/layout/enhancement
@@ -1624,6 +1663,7 @@ class MainWindow(QtWidgets.QWidget):
         for b in (self.btn_ocr, self.btn_copy, self.btn_pin,
                   self.btn_beautify, self.btn_save):
             exports.addWidget(b)
+        exports.addStretch(1)
         layout.addWidget(card)
 
         # ---------- Canvas ---------- #
@@ -1646,7 +1686,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_manual.clicked.connect(lambda: self.start_select("manual"))
         self.btn_scroll.clicked.connect(lambda: self.start_select("scroll"))
         self.btn_single.clicked.connect(lambda: self.start_select("single"))
-        self.btn_ocr.clicked.connect(self.run_ocr)
+        self.btn_ocr.clicked.connect(lambda: self.run_ocr())
         self.btn_copy.clicked.connect(self.copy_image)
         self.btn_pin.clicked.connect(self.pin_image)
         self.btn_save.clicked.connect(self.save_image)
@@ -1657,6 +1697,16 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_beautify.clicked.connect(self.beautify_export)
         self.btn_history.clicked.connect(self.show_history)
         self.btn_settings.clicked.connect(self.show_settings)
+        self._undo_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence.Undo, self)
+        self._undo_shortcut.setContext(Qt.WindowShortcut)
+        self._undo_shortcut.activated.connect(self._undo_current_context)
+
+    def _undo_current_context(self):
+        focus = QtWidgets.QApplication.focusWidget()
+        if focus is self.text or self.text.isAncestorOf(focus):
+            self.text.undo()
+        else:
+            self.canvas.undo()
 
     def _retranslate(self):
         """Refresh the main UI text according to the current language (called when switching languages)."""
@@ -2017,6 +2067,7 @@ class MainWindow(QtWidgets.QWidget):
 
     # --- after capture: copy to clipboard by default + bottom-left floating thumbnail --- #
     def _present_capture(self, img, status):
+        self._ocr_serial += 1          # an older OCR result must not replace this capture
         self._add_history(bgr_to_qimage(img), status)
         # default behavior: copy image to clipboard (auto_copy on by default)
         copied = self.settings.value("auto_copy", True, type=bool)
@@ -2025,10 +2076,13 @@ class MainWindow(QtWidgets.QWidget):
         if self.settings.value("auto_save", False, type=bool):
             self._auto_save(img)
         self.status.setText(status + ("  " + t("st_copied") if copied else ""))
-        # setting: open the editor right after capture (otherwise only show the thumbnail, main window stays blank)
-        if self.settings.value("open_editor", False, type=bool):
+        # Auto OCR needs the captured image in the editor to display its result.
+        auto_ocr = self.settings.value("auto_ocr", True, type=bool)
+        if auto_ocr or self.settings.value("open_editor", False, type=bool):
             self._load_into_editor(img)
         self._show_thumbnail(img)
+        if auto_ocr:
+            QtCore.QTimer.singleShot(0, lambda captured=img: self._auto_ocr_for(captured))
 
     def _add_history(self, qimg, desc):
         self.history.insert(0, (qimg, desc))
@@ -2079,6 +2133,7 @@ class MainWindow(QtWidgets.QWidget):
 
     def _load_into_editor(self, img):
         """Load the given screenshot into the editor and show it (thumbnail / history / open_editor setting)."""
+        self._ocr_serial += 1
         self.image_bgr = img
         self.showNormal()
         self._show_preview()
@@ -2087,6 +2142,7 @@ class MainWindow(QtWidgets.QWidget):
 
     def _blank_editor(self):
         """Reset the editor to a blank state (so opening the main window doesn't show the last screenshot)."""
+        self._ocr_serial += 1
         self.image_bgr = None
         self.canvas.clear()
         self.text.clear()
@@ -2116,6 +2172,7 @@ class MainWindow(QtWidgets.QWidget):
         if x1 - x0 < 2 or y1 - y0 < 2:
             return
         self.image_bgr = self.image_bgr[y0:y1, x0:x1].copy()
+        self._ocr_serial += 1
         self._show_preview()                        # reset canvas (annotations are cleared)
         self.status.setText(f"Cropped: {x1 - x0}×{y1 - y0} px (annotations cleared)")
 
@@ -2126,45 +2183,45 @@ class MainWindow(QtWidgets.QWidget):
             self.btn_color.setIcon(swatch_icon(c))
 
     # --- OCR --- #
-    def run_ocr(self):
+    def _auto_ocr_for(self, img):
+        if self.image_bgr is img:
+            self.run_ocr(copy_result=False)
+
+    def run_ocr(self, copy_result=True):
         if self.image_bgr is None:
             self.status.setText(t("st_need_shot"))
             return
-        try:
-            import pytesseract
-        except ImportError:
-            self.status.setText("pytesseract not installed")
-            return
+        self._ocr_serial += 1
+        serial = self._ocr_serial
         self.status.setText(t("st_ocr_running"))
-        QtWidgets.QApplication.processEvents()
+        worker = OCRWorker(self.image_bgr, self.lang.currentText(),
+                           self.psm.currentData(), self.enhance.isChecked(),
+                           automatic=not copy_result, parent=self)
+        self._ocr_workers.append(worker)
+        worker.result.connect(
+            lambda txt, error: self._on_ocr_result(serial, txt, error, copy_result))
+        worker.finished.connect(lambda: self._release_ocr_worker(worker))
+        worker.start()
 
-        if self.enhance.isChecked():
-            proc = preprocess_for_ocr(self.image_bgr)   # grayscale binarized image
-            pil = Image.fromarray(proc)
-        else:
-            pil = Image.fromarray(cv2.cvtColor(self.image_bgr, cv2.COLOR_BGR2RGB))
+    def _release_ocr_worker(self, worker):
+        self._ocr_workers.remove(worker)
+        worker.deleteLater()
 
-        # --oem 1 = LSTM engine; --psm page segmentation mode; preprocessing already upscaled, hint dpi for better segmentation
-        psm = self.psm.currentData()
-        config = f"--oem 1 --psm {psm} -c preserve_interword_spaces=1 --dpi 150"
-        try:
-            txt = pytesseract.image_to_string(
-                pil, lang=self.lang.currentText(), config=config)
-        except pytesseract.TesseractNotFoundError:
-            self.status.setText("tesseract not found; run: apt install tesseract-ocr")
+    def _on_ocr_result(self, serial, txt, error, copy_result):
+        if serial != self._ocr_serial:
             return
-        except Exception as exc:                      # noqa: BLE001
-            self.status.setText(f"OCR error: {exc} (language pack may be missing)")
+        if error:
+            self.status.setText(error)
             return
-
-        # Strip extra spaces commonly inserted between CJK chars (keep spaces between Latin words)
-        if "chi" in self.lang.currentText():
-            txt = _strip_cjk_spaces(txt)
         self.text.setPlainText(txt)
-        QtWidgets.QApplication.clipboard().setText(txt)
-        self.status.setText(
-            (f"OCR done, copied to clipboard ({len(txt)} chars)" if _LANG == "en"
-             else f"OCR 完成,已复制到剪贴板({len(txt)} 字符)"))
+        if copy_result:
+            QtWidgets.QApplication.clipboard().setText(txt)
+        if _LANG == "en":
+            self.status.setText(
+                f"OCR done{' and copied' if copy_result else ''} ({len(txt)} chars)")
+        else:
+            self.status.setText(
+                f"OCR 完成{'，已复制文字' if copy_result else ''}（{len(txt)} 字符）")
 
     # --- copy image to clipboard --- #
     def copy_image(self):
@@ -2244,6 +2301,8 @@ class MainWindow(QtWidgets.QWidget):
     def quit_app(self):
         if self._recorder is not None:
             self._on_record_stop()
+        for worker in self._ocr_workers:
+            worker.wait()
         QtWidgets.QApplication.quit()
 
     def show_settings(self):
@@ -2309,6 +2368,9 @@ class MainWindow(QtWidgets.QWidget):
         enh = QtWidgets.QCheckBox(t("set_ocr_enh"))
         enh.setChecked(s.value("ocr_enhance", True, type=bool))
         of.addRow(t("set_ocr_deflang"), lang); of.addRow(t("set_ocr_deflayout"), psm); of.addRow(enh)
+        cb_autoocr = QtWidgets.QCheckBox(t("set_autoocr"))
+        cb_autoocr.setChecked(s.value("auto_ocr", True, type=bool))
+        of.addRow(cb_autoocr)
         of.addRow(QtWidgets.QLabel(t("set_ocr_note")))
         tabs.addTab(o, t("tab_ocr"))
 
@@ -2368,6 +2430,7 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("ocr_lang", lang.currentText())
         s.setValue("ocr_psm", psm.currentData())
         s.setValue("ocr_enhance", enh.isChecked())
+        s.setValue("auto_ocr", cb_autoocr.isChecked())
         s.setValue("record_fps", fps.value())
         s.setValue("record_gif", cb_gif.isChecked())
         s.setValue("ui_theme", theme.currentData())
