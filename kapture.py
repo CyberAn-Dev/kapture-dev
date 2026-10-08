@@ -157,6 +157,7 @@ TR = {
     "a_color": {"zh": "标注颜色", "en": "Annotation color"},
     "a_undo": {"zh": "撤销（Ctrl+Z）", "en": "Undo (Ctrl+Z)"},
     "a_clear": {"zh": "清除标注", "en": "Clear annotations"},
+    "a_picktext": {"zh": "选词", "en": "Select words"},
     # Export
     "e_ocr": {"zh": "OCR 提取文字", "en": "OCR extract text"},
     "e_copy": {"zh": "复制图片", "en": "Copy image"},
@@ -233,6 +234,16 @@ TR = {
     "st_pinned": {"zh": "已钉到屏幕(拖动移动、滚轮缩放、双击关闭)",
                   "en": "Pinned (drag to move, wheel to zoom, double-click to close)"},
     "hist_title": {"zh": "历史截图", "en": "History"},
+    "lab_ocr_pending": {"zh": "OCR 识别中，结果待图片打开后显示……",
+                        "en": "OCR done — text shows when the image opens…"},
+    "st_ocr_text": {"zh": "文字", "en": "text"},
+    "st_ocr_none": {"zh": "未识别到文字", "en": "No text recognized"},
+    "t_ocr": {"zh": "截屏取词", "en": "Screen text grab"},
+    "card_edit": {"zh": "编辑标注", "en": "Edit annotations"},
+    "card_copy": {"zh": "复制图片", "en": "Copy image"},
+    "card_save": {"zh": "保存图片", "en": "Save image"},
+    "card_pin": {"zh": "钉到屏幕", "en": "Pin to screen"},
+    "card_close": {"zh": "关闭", "en": "Close"},
 }
 
 
@@ -295,12 +306,22 @@ def line_icon(name, color="#d2d2da", size=22):
         head(16.5, 7.5, math.radians(20))
     elif name == "history":
         Ell(4, 4, 16, 16); L(12, 12, 12, 7.5); L(12, 12, 15.5, 13.5)
-    elif name == "settings":   # gear
-        Ell(9, 9, 6, 6)
-        for k in range(8):
-            a = math.radians(k * 45)
-            L(12 + 8 * math.cos(a), 12 + 8 * math.sin(a),
-              12 + 10.5 * math.cos(a), 12 + 10.5 * math.sin(a))
+    elif name == "settings":   # gear: toothed outline polygon + hub
+        path = QtGui.QPainterPath()
+        n, step, tw = 7, 2 * math.pi / 7.0, 0.42
+        first = True
+        for k in range(n):
+            a0 = k * step
+            for (r, a) in [(7.0, a0), (9.5, a0 + step * 0.10),
+                           (9.5, a0 + step * (0.10 + tw)), (7.0, a0 + step * (0.20 + tw))]:
+                q = Pt(12 + r * math.cos(a), 12 + r * math.sin(a))
+                if first:
+                    path.moveTo(q); first = False
+                else:
+                    path.lineTo(q)
+        path.closeSubpath()
+        p.drawPath(path)
+        Ell(8.8, 8.8, 6.4, 6.4)
     elif name == "ocr":
         if _LANG == "en":
             glyph("OCR", 0.4)
@@ -353,14 +374,23 @@ def line_icon(name, color="#d2d2da", size=22):
         Ell(5, 5, 10, 10); L(14, 14, 19, 19)
     elif name == "crop":
         L(8, 4, 8, 17); L(8, 17, 20, 17); L(4, 7, 16, 7); L(16, 7, 16, 20)
-    elif name == "undo":
-        p.drawArc(QtCore.QRectF(6 * u, 7 * u, 13 * u, 12 * u), 40 * 16, 220 * 16)
-        head(7, 9.5, math.radians(120))
+    elif name == "undo":       # ↩ loop-back arrow
+        path = QtGui.QPainterPath(Pt(17, 19))
+        path.cubicTo(Pt(20, 12), Pt(15, 7), Pt(9.5, 8.5))
+        p.drawPath(path)
+        L(9.5, 8.5, 12.5, 6); L(9.5, 8.5, 13, 11)
     elif name == "clear":      # trash can
         L(5, 7, 19, 7); Rr(7, 7, 10, 13, 1); L(10, 5, 14, 5)
         L(10, 10, 10, 17); L(14, 10, 14, 17)
     elif name == "close":      # ✕
         L(6, 6, 18, 18); L(18, 6, 6, 18)
+    elif name == "picktext":   # cursor over a text line (cursor word selection)
+        L(6, 5, 17, 5); L(6, 8.5, 13, 8.5)
+        p.setBrush(QtGui.QColor(color))
+        p.drawPolygon(QtGui.QPolygonF([Pt(8, 11.5), Pt(8, 20.5), Pt(10.8, 17.8),
+                                       Pt(12.6, 21.5), Pt(14.4, 20.6),
+                                       Pt(12.6, 17), Pt(16.2, 16.6)]))
+        p.setBrush(Qt.NoBrush)
     else:
         Ell(7, 7, 10, 10)
     p.end()
@@ -1085,6 +1115,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
     on export they're drawn into the original image 1:1 to produce the merged image.
     """
     cropRequested = QtCore.pyqtSignal(object)   # emits the crop rect (image coordinates, QRectF)
+    textSelected = QtCore.pyqtSignal(str)       # picktext: words the user dragged over
+    picktextNeedsWords = QtCore.pyqtSignal()    # picktext used before word boxes exist
 
     def __init__(self):
         super().__init__()
@@ -1092,7 +1124,11 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.items = []             # completed annotations
         self.cur = None             # annotation currently being drawn
         self.scale = 1.0
-        self.tool = "rect"
+        self.tool = "picktext"
+        self.setCursor(Qt.IBeamCursor)    # default tool selects words with a text cursor
+        self._word_boxes = []       # [(QRectF image coords, word)] from the last OCR
+        self._sel_from = None       # picktext selection: index range endpoints
+        self._sel_to = None
         self.color = QtGui.QColor(255, 40, 40)
         self.width = 3
         self.setMouseTracking(True)
@@ -1107,7 +1143,15 @@ class AnnotateCanvas(QtWidgets.QWidget):
                                  QtGui.QImage.Format_RGB888).copy()
         self.items.clear()
         self.cur = None
+        self._word_boxes = []
+        self._sel_from = self._sel_to = None
         self._apply_size()
+
+    def set_word_boxes(self, words):
+        """Set the selectable word boxes [(QRectF image coords, word)] from OCR."""
+        self._word_boxes = list(words)
+        self._sel_from = self._sel_to = None
+        self.update()
 
     def fit_width(self, avail_w):
         if self.base is None:
@@ -1125,6 +1169,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def set_tool(self, name):
         self.tool = name
+        # word selection uses the text I-beam, other tools the normal pointer
+        self.setCursor(Qt.IBeamCursor if name == "picktext" else Qt.ArrowCursor)
 
     def set_color(self, qcolor):
         self.color = qcolor
@@ -1146,6 +1192,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.base = None
         self.items.clear()
         self.cur = None
+        self._word_boxes = []
+        self._sel_from = self._sel_to = None
         self.setMinimumSize(0, 0)
         self.resize(self.parent().size() if self.parent() else QtCore.QSize(400, 300))
         self.update()
@@ -1182,6 +1230,12 @@ class AnnotateCanvas(QtWidgets.QWidget):
             self._draw_item(p, it)
         if self.cur:
             self._draw_item(p, self.cur)
+        # picktext: cyan highlight under the words the user is dragging over
+        if self.tool == "picktext" and self._sel_from is not None:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QtGui.QColor(10, 132, 255, 110))
+            for r, _w in self._selected_words():
+                p.drawRect(r)
 
     def _draw_item(self, p, it):
         pen = QtGui.QPen(it["color"], it["width"], Qt.SolidLine,
@@ -1290,10 +1344,29 @@ class AnnotateCanvas(QtWidgets.QWidget):
             p.drawLine(b, QtCore.QPointF(x, y))
 
     # --- Mouse interaction --- #
+    def _word_at(self, img_pt):
+        for i, (r, _w) in enumerate(self._word_boxes):
+            if r.adjusted(-2, -2, 2, 2).contains(img_pt):
+                return i
+        return None
+
+    def _selected_words(self):
+        if self._sel_from is None or self._sel_to is None or not self._word_boxes:
+            return []
+        a, b = sorted((self._sel_from, self._sel_to))
+        return [self._word_boxes[i] for i in range(a, b + 1) if i < len(self._word_boxes)]
+
     def mousePressEvent(self, e):
         if self.base is None:
             return
         pt = self._to_img(e.pos())
+        if self.tool == "picktext":
+            if not self._word_boxes:
+                self.picktextNeedsWords.emit()
+                return
+            self._sel_from = self._sel_to = self._word_at(pt)
+            self.update()
+            return
         if self.tool == "text":
             txt, ok = QtWidgets.QInputDialog.getText(self, "Add text", "Text:")
             if ok and txt:
@@ -1318,6 +1391,13 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.update()
 
     def mouseMoveEvent(self, e):
+        if self.tool == "picktext":
+            if e.buttons() & Qt.LeftButton and self._sel_from is not None:
+                i = self._word_at(self._to_img(e.pos()))
+                if i is not None and i != self._sel_to:
+                    self._sel_to = i
+                    self.update()
+            return
         if self.cur is None:
             return
         pt = self._to_img(e.pos())
@@ -1328,6 +1408,13 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if self.tool == "picktext":
+            words = [w for _r, w in self._selected_words()]
+            self._sel_from = self._sel_to = None
+            self.update()
+            if words:
+                self.textSelected.emit(" ".join(words))
+            return
         if self.cur is None:
             return
         if self.cur["type"] == "crop":
@@ -1366,6 +1453,7 @@ class FloatingThumbnail(QtWidgets.QWidget):
         # properly take over/release the mouse pointer grab, avoiding a stuck drag that "freezes" the whole desktop
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_AlwaysShowToolTips)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -1382,29 +1470,40 @@ class FloatingThumbnail(QtWidgets.QWidget):
         self._thumb.setStyleSheet("border:2px solid #444;border-radius:4px;background:#000;")
         lay.addWidget(self._thumb)
 
-        # Action button row — vector line icons shared with the main toolbar
-        # (emoji glyphs render as empty boxes when no emoji font is installed).
-        row = QtWidgets.QHBoxLayout()
-        row.setSpacing(4)
-        for icon_name, tip, cb in [("pen", "Edit", self._do_edit),
-                                   ("copy", "Copy", self._do_copy),
-                                   ("save", "Save", self._do_save),
-                                   ("pin", "Pin to screen", self._do_pin),
-                                   ("close", "Close", self._do_close)]:
+        # Action bar — one segmented bar (PixPin-style): icon buttons in a
+        # single rounded strip divided by hairlines, instead of loose buttons.
+        bar = QtWidgets.QFrame()
+        bar.setObjectName("cardBar")
+        row = QtWidgets.QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        for i, (icon_name, tip_key, cb) in enumerate([
+                ("pen", "card_edit", self._do_edit),
+                ("copy", "card_copy", self._do_copy),
+                ("save", "card_save", self._do_save),
+                ("pin", "card_pin", self._do_pin),
+                ("close", "card_close", self._do_close)]):
+            if i:
+                sep = QtWidgets.QFrame()
+                sep.setFrameShape(QtWidgets.QFrame.VLine)
+                sep.setObjectName("cardSep")
+                row.addWidget(sep)
             btn = QtWidgets.QToolButton()
             btn.setIcon(line_icon(icon_name, size=22))
             btn.setIconSize(QtCore.QSize(22, 22))
-            btn.setToolTip(tip)
-            btn.setFixedSize(42, 34)
+            btn.setToolTip(t(tip_key))
+            btn.setFixedSize(44, 34)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(cb)
             row.addWidget(btn)
-        lay.addLayout(row)
+        lay.addWidget(bar, alignment=Qt.AlignHCenter)
 
         self.setStyleSheet(
             "FloatingThumbnail{background:transparent;}"
-            "QToolButton{background:#2b2b2b;border:none;border-radius:4px;}"
-            "QToolButton:hover{background:#0a84ff;}")
+            "QFrame#cardBar{background:#2b2b2b;border-radius:6px;}"
+            "QFrame#cardBar QToolButton{background:transparent;border:none;}"
+            "QFrame#cardBar QToolButton:hover{background:#0a84ff;}"
+            "QFrame#cardSep{background:#4a4a52;max-width:1px;border:none;}")
         self.adjustSize()
         self._place()
 
@@ -1688,6 +1787,7 @@ class RecordBar(QtWidgets.QWidget):
 # --------------------------------------------------------------------------- #
 class OCRWorker(QThread):
     result = pyqtSignal(str, str)     # recognized text, or an error message
+    wordsReady = pyqtSignal(object)   # list of (QRectF in image coords, word)
 
     def __init__(self, img, lang, psm, enhance, automatic, parent=None):
         super().__init__(parent)
@@ -1696,6 +1796,28 @@ class OCRWorker(QThread):
         self.psm = psm
         self.enhance = enhance
         self.automatic = automatic
+
+    def _word_boxes(self, pil, upscale):
+        """Per-word boxes via Tesseract's TSV data, mapped back to image coords."""
+        import pytesseract
+        try:
+            data = pytesseract.image_to_data(pil, lang=self.lang,
+                                             config=f"--psm {self.psm}",
+                                             output_type=pytesseract.Output.DICT)
+        except Exception:
+            return []
+        out = []
+        for i, word in enumerate(data.get("text", [])):
+            word = (word or "").strip()
+            if not word or int(data.get("conf", ["0"] * len(data["text"]))[i] or -1) < 30:
+                continue
+            try:
+                x, y = float(data["left"][i]) / upscale, float(data["top"][i]) / upscale
+                w, h = float(data["width"][i]) / upscale, float(data["height"][i]) / upscale
+            except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                continue
+            out.append((QtCore.QRectF(x, y, w, h), word))
+        return out
 
     def run(self):
         try:
@@ -1706,8 +1828,10 @@ class OCRWorker(QThread):
         try:
             if self.enhance:
                 pil = Image.fromarray(preprocess_for_ocr(self.img))
+                upscale = 2.0          # preprocess_for_ocr upscales 2x
             else:
                 pil = Image.fromarray(cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB))
+                upscale = 1.0
             config = f"--oem 1 --psm {self.psm} -c preserve_interword_spaces=1 --dpi 150"
             txt = pytesseract.image_to_string(
                 pil, lang=self.lang, config=config, timeout=20 if self.automatic else 0)
@@ -1720,11 +1844,21 @@ class OCRWorker(QThread):
         if "chi" in self.lang:
             txt = _strip_cjk_spaces(txt)
         self.result.emit(txt, "")
+        try:
+            words = self._word_boxes(pil, upscale)
+            if words:
+                self.wordsReady.emit(words)
+        except Exception:                              # noqa: BLE001
+            pass                                       # word boxes are an extra, never fatal
 
 
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
+        # Background/tray apps are often not the "active" window (GNOME refuses
+        # activation), and Qt suppresses hover tooltips on inactive windows —
+        # without this, tooltips only appear after clicking into the window.
+        self.setAttribute(Qt.WA_AlwaysShowToolTips)
         self.setWindowTitle("Kapture")
         self.resize(820, 660)
         self.image_bgr = None        # current screenshot (BGR numpy)
@@ -1741,6 +1875,7 @@ class MainWindow(QtWidgets.QWidget):
         self._ocr_serial = 0
         self._ocr_pending = None        # (serial, text) held until the editor shows the image
         self._ocr_image_shown = False   # canvas currently paints self.image_bgr
+        self._words_inflight = False    # background OCR running to fill word boxes
         self._build_ui()
         self._apply_style()
         self._setup_tray()
@@ -1816,13 +1951,13 @@ class MainWindow(QtWidgets.QWidget):
         card_layout.addLayout(tools)
         self.tool_group = QtWidgets.QButtonGroup(self)
         self._tool_btns = {}
-        for name in ["rect", "ellipse", "arrow", "line", "pen", "text",
-                     "number", "highlight", "blur", "magnify", "crop"]:
+        for name in ["picktext", "rect", "ellipse", "arrow", "line", "pen",
+                     "text", "number", "highlight", "blur", "magnify", "crop"]:
             b = self._tbtn(name, "", checkable=True)
             b.clicked.connect(lambda _, n=name: self.canvas.set_tool(n))
             self.tool_group.addButton(b); tools.addWidget(b)
             self._tool_btns[name] = b
-            if name == "rect":
+            if name == "picktext":
                 b.setChecked(True)
         self.btn_color = QtWidgets.QToolButton()
         self.btn_color.setIcon(swatch_icon(QtGui.QColor(255, 40, 40)))
@@ -1896,6 +2031,8 @@ class MainWindow(QtWidgets.QWidget):
         # ---------- Canvas ---------- #
         self.canvas = AnnotateCanvas()
         self.canvas.cropRequested.connect(self._do_crop)
+        self.canvas.textSelected.connect(self._on_text_selected)
+        self.canvas.picktextNeedsWords.connect(self._ensure_word_boxes)
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidget(self.canvas)
         self.scroll.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
@@ -1907,7 +2044,10 @@ class MainWindow(QtWidgets.QWidget):
 
         self.status = QtWidgets.QLabel()
         self.status.setObjectName("status")
-        layout.addWidget(self.status)
+        # The status line is no longer shown: capture/OCR feedback arrives via the
+        # floating card and the OCR-box toast. The label still exists because
+        # internal logic reads/writes its text as state.
+        self.status.hide()
 
         # ---------- Connections ---------- #
         self.btn_manual.clicked.connect(lambda: self.start_select("manual"))
@@ -2480,6 +2620,66 @@ class MainWindow(QtWidgets.QWidget):
             self._ocr_pending = None
             self.text.setPlainText(txt)
 
+    def _ensure_word_boxes(self):
+        """picktext clicked before any OCR ran: recognize the whole image once
+        so word boxes exist for cursor selection."""
+        if self.image_bgr is None:
+            return
+        if self.canvas._word_boxes or getattr(self, "_words_inflight", False):
+            return
+        self._words_inflight = True
+        self._toast(t("st_ocr_running"))
+        self.run_ocr(copy_result=False)
+
+    def _on_text_selected(self, words_text):
+        """picktext release: the user dragged over recognized words — copy them."""
+        QtWidgets.QApplication.clipboard().setText(words_text)
+        self.text.setPlainText(words_text)
+        n = len(words_text)
+        self._toast((f"Copied {n} chars" if _LANG == "en" else f"已复制 {n} 字符"))
+
+    def _toast(self, msg):
+        """Transient note floating in the bottom-right of the OCR text box;
+        fades away by itself (the status bar stays clean)."""
+        tip = getattr(self, "_toast_lbl", None)
+        if tip is None:
+            tip = QtWidgets.QLabel(self.text)
+            tip.setObjectName("ocrToast")
+            tip.setAlignment(Qt.AlignCenter)
+            tip.setStyleSheet(
+                "QLabel#ocrToast{background:rgba(40,40,48,215);color:#e8e8ec;"
+                "border-radius:6px;padding:5px 12px;}")
+            tip.setAttribute(Qt.WA_TransparentForMouseEvents)
+            tip.setGraphicsEffect(QtWidgets.QGraphicsOpacityEffect(tip))
+            self._toast_lbl = tip
+            self.text.installEventFilter(self)
+        tip.setText(msg)
+        tip.adjustSize()
+        self._place_toast()
+        tip.show()
+        eff = tip.graphicsEffect()
+        eff.setOpacity(1.0)
+        anim = QtCore.QPropertyAnimation(eff, b"opacity", tip)
+        anim.setDuration(4000)
+        anim.setStartValue(1.0)
+        anim.setKeyValueAt(0.55, 1.0)
+        anim.setEndValue(0.0)
+        anim.finished.connect(lambda: tip.hide())
+        anim.start()
+        self._toast_anim = anim          # keep a reference while running
+
+    def _place_toast(self):
+        tip = getattr(self, "_toast_lbl", None)
+        if tip is None:
+            return
+        vp = self.text.viewport()
+        tip.move(vp.width() - tip.width() - 12, vp.height() - tip.height() - 10)
+
+    def eventFilter(self, obj, ev):
+        if obj is self.text and ev.type() == QtCore.QEvent.Resize:
+            self._place_toast()
+        return super().eventFilter(obj, ev)
+
     def _do_crop(self, rectf):
         if self.image_bgr is None:
             return
@@ -2505,21 +2705,31 @@ class MainWindow(QtWidgets.QWidget):
         if self.image_bgr is img:
             self.run_ocr(copy_result=False)
 
-    def run_ocr(self, copy_result=True):
-        if self.image_bgr is None:
+    def run_ocr(self, copy_result=True, img=None):
+        img = self.image_bgr if img is None else img
+        if img is None:
             self.status.setText(t("st_need_shot"))
             return
         self._ocr_serial += 1
         serial = self._ocr_serial
-        self.status.setText(t("st_ocr_running"))
-        worker = OCRWorker(self.image_bgr, self.lang.currentText(),
+        self._toast(t("st_ocr_running"))       # OCR chatter lives in the OCR box, not the status bar
+        worker = OCRWorker(img, self.lang.currentText(),
                            self.psm.currentData(), self.enhance.isChecked(),
                            automatic=not copy_result, parent=self)
         self._ocr_workers.append(worker)
         worker.result.connect(
             lambda txt, error: self._on_ocr_result(serial, txt, error, copy_result))
+        worker.wordsReady.connect(self._on_words_ready)
         worker.finished.connect(lambda: self._release_ocr_worker(worker))
         worker.start()
+
+    def _on_words_ready(self, words):
+        self._words_inflight = False
+        if self.image_bgr is not None and words:
+            self.canvas.set_word_boxes(words)
+            if self._ocr_image_shown:
+                self._toast(f"{len(words)} 个可取词" if _LANG == "zh"
+                            else f"{len(words)} selectable words")
 
     def _release_ocr_worker(self, worker):
         self._ocr_workers.remove(worker)
@@ -2529,21 +2739,20 @@ class MainWindow(QtWidgets.QWidget):
         if serial != self._ocr_serial:
             return
         if error:
-            self.status.setText(error)
+            if self._ocr_image_shown:
+                self._toast(error)
             return
         if copy_result:
             QtWidgets.QApplication.clipboard().setText(txt)
-        if _LANG == "en":
-            self.status.setText(
-                f"OCR done{' and copied' if copy_result else ''} ({len(txt)} chars)")
-        else:
-            self.status.setText(
-                f"OCR 完成{'，已复制文字' if copy_result else ''}（{len(txt)} 字符）")
         if not copy_result and not self._ocr_image_shown:
-            # Automatic OCR of a background capture finished before the image is
-            # in the editor: hold the text until the user actually opens it.
+            # Background capture: the editor is not on screen — stay silent and
+            # hold the text until the user actually opens the image.
             self._ocr_pending = (serial, txt)
             return
+        if _LANG == "en":
+            self._toast(f"OCR done{' and copied' if copy_result else ''} ({len(txt)} chars)")
+        else:
+            self._toast(f"OCR 完成{'，已复制文字' if copy_result else ''}（{len(txt)} 字符）")
         self.text.setPlainText(txt)
 
     # --- copy image to clipboard --- #
@@ -3014,6 +3223,15 @@ def main():
     if _os.path.exists(_icon_path()):
         app.setWindowIcon(QtGui.QIcon(_icon_path()))
     app.setStyle("Fusion")                       # consistent base widget look
+
+    class _FastTip(QtWidgets.QProxyStyle):
+        """Shorter tooltip delay: 0.5 s instead of the ~1 s+ platform default."""
+        def styleHint(self, hint, option=None, widget=None, returnData=None):
+            if hint == QtWidgets.QStyle.SH_ToolTip_WakeUpDelay:
+                return 500
+            return super().styleHint(hint, option, widget, returnData)
+
+    app.setStyle(_FastTip("Fusion"))
     # Dark tooltips via palette (avoid styling QToolTip in QSS, which clips the text)
     pal = app.palette()
     pal.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor("#2a2a31"))

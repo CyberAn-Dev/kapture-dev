@@ -48,3 +48,8 @@
 
 - The floating capture card uses the `line_icon` vector set, not emoji: emoji render as empty boxes on systems without an emoji font, and vector icons inherit the app's existing icon style. Icons are validated by counting non-transparent pixels (`toImage()` without Format_ARGB32 ignores alpha and yields a false "full").
 - Automatic OCR results are held in `_ocr_pending` until `_show_preview()` puts the image on the canvas, keyed by `_ocr_serial`; a crop invalidates the pending text. Chosen over delaying/slowing OCR itself — the engine (0.23–0.56 s) is not the bottleneck, ordering is.
+- In-editor text grab is a canvas tool (`picktext`), not a separate mode: drag → `textGrabRequested(QRectF)` → OCR only that crop with `copy_result=True`; Enter re-OCRs the remembered `_last_pick_rect`. picktext is the default selected tool. The dashed box is preview-only and excluded from annotations/exports, same rule as crop.
+
+## Pending follow-ups from user feedback
+
+- A one-click 截屏取词 toolbar/shortcut action (region → OCR → clipboard, no editor) was requested conceptually ("screen text grab"); the `textgrab` icon and translation keys (`t_ocr` 等) are already in the file but the action itself is not wired yet — awaiting confirmation.
