@@ -43,6 +43,44 @@ class ShortcutTest(unittest.TestCase):
         self.assertEqual(kapture.gnome_accelerator(sequence), "<Control><Alt>k")
         self.assertEqual(kapture.gnome_key_sequence("<Control><Alt>k"), sequence)
 
+    def test_startup_reregisters_dropped_paths_and_defaults(self):
+        """The login-time clobber self-heal: a stored binding missing from the
+        master array is re-registered; unbound DEFAULT_KEYS actions get defaults;
+        unrelated custom entries survive; a retry is scheduled once."""
+        with tempfile.TemporaryDirectory() as config_dir, mock.patch.dict(
+                os.environ, {"XDG_CONFIG_HOME": config_dir, "GSETTINGS_BACKEND": "keyfile"}):
+            other = kapture.GNOME_CUSTOM_ROOT + "other-app/"
+            region = kapture._gnome_path("--region")
+            sub = f"{kapture.GNOME_CUSTOM_SCHEMA}:{region}"
+            kapture._gsettings("set", sub, "name", repr("Kapture: Region capture"))
+            kapture._gsettings("set", sub, "command", repr("run.sh --region"))
+            kapture._gsettings("set", sub, "binding", repr("<Alt>grave"))
+            # master array emptied by the login-time clobber, only foreign entry left
+            kapture._gsettings("set", kapture.GNOME_MEDIA_SCHEMA,
+                                "custom-keybindings", repr([other]))
+            with mock.patch.object(kapture, "shortcut_backend", return_value="gnome"), \
+                    mock.patch.object(kapture.QtCore.QTimer, "singleShot") as ss:
+                self.window._ensure_default_shortcuts()
+            paths = kapture._gnome_paths()
+            self.assertIn(region, paths)                    # healed
+            self.assertIn(other, paths)                     # untouched
+            self.assertEqual(kapture.gnome_current_key("--region"), "<Alt>grave")
+            pin1 = kapture._gnome_path("--pin1")
+            self.assertIn(pin1, paths)                      # default registered
+            self.assertEqual(kapture.gnome_current_key("--pin1"), "<Control>1")
+            ss.assert_called_once()                         # delayed retry armed
+
+    def test_startup_heal_is_one_shot_after_retry(self):
+        with tempfile.TemporaryDirectory() as config_dir, mock.patch.dict(
+                os.environ, {"XDG_CONFIG_HOME": config_dir, "GSETTINGS_BACKEND": "keyfile"}):
+            kapture._gsettings("set", kapture.GNOME_MEDIA_SCHEMA,
+                                "custom-keybindings", "[]")
+            with mock.patch.object(kapture, "shortcut_backend", return_value="gnome"), \
+                    mock.patch.object(kapture.QtCore.QTimer, "singleShot") as ss:
+                self.window._ensure_default_shortcuts()     # arms the retry
+                self.window._ensure_default_shortcuts()     # retry run: no re-arm
+            self.assertEqual(ss.call_count, 1)
+
     def test_gnome_shortcuts_preserve_other_custom_entries(self):
         with tempfile.TemporaryDirectory() as config_dir, mock.patch.dict(
                 os.environ, {"XDG_CONFIG_HOME": config_dir, "GSETTINGS_BACKEND": "keyfile"}):

@@ -42,6 +42,7 @@
 - 全部识别/全部复制 moved inside the OCR box bottom-left (children of the text viewport, repositioned on resize) and now appear only while the box holds recognized text.
 - Scrolling captures (auto + manual) got a PixPin-style HUD: red click-through region outline plus a floating panel with a live downsampled thumbnail, current stitched height, and a stop button. Auto mode previously gave no on-screen feedback at all (progress went to the hidden status label); its worker now emits a `frame` signal and the HUD stop aborts the worker, which emits the partial image. ManualBar was replaced by the shared `ScrollHud`. 59 tests green (10 new).
 - 美化导出 (beautify export) confirmed functional but niche: it composites the annotated screenshot onto a pink/violet gradient with rounded corners and shadow and saves a PNG (macOS-style share image). Handling undecided — awaiting user decision.
+- Root-caused the recurring "Alt+\` only works after visiting settings": something clobbers the master `custom-keybindings` array around login, keeping only what Kapture registers at startup (pin1/pin2 via DEFAULT_KEYS); region's binding stayed stored but unregistered, which settings-save repaired manually. Startup now self-heals — every stored binding is re-registered into the master array, repeated once after 6 s; live-verified the array holds region after restart + retry. 61 tests green (2 new self-heal cases).
 
 ## Blockers and next step
 

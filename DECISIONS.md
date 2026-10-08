@@ -39,6 +39,7 @@
 
 ## Shortcut save semantics and overlay window flags
 
+- Startup shortcut registration is self-healing, not first-run-only: `_ensure_default_shortcuts` re-registers every stored binding back into the master `custom-keybindings` array (a bound action is rewritten with its own value, so user choices survive) and repeats once after 6 s to outrace GNOME's login-time clobber. Root-cause evidence: after each login only the `DEFAULT_KEYS` paths (pin1/pin2) were present while the stored region binding stayed outside the array — the exact state settings-save repaired by hand, hence "Alt+` only works after opening settings".
 - A blank shortcut row on save means "not bound", never "unbind": it keeps the stored binding and re-registers the path in the master array. Only the row's ✕ button (`explicit_clear`) removes the path and resets name/command/binding. Rationale: an action can vanish from the master `custom-keybindings` array while its binding stays stored; showing it as empty and then saving deleted it for good (the repeated Alt+\` failure).
 - `gnome_current_key()` reads the action subpath directly, not only when the path is listed in the master array, so stored-but-unregistered bindings still display and can be repaired by a plain save.
 - The region-selection overlay uses `X11BypassWindowManagerHint` rather than `Qt.Tool`, matching the other overlays, so it covers the top bar/dock and its geometry matches the frozen frame. Because bypassed windows receive no WM keyboard focus, the overlay grabs/releases the keyboard itself; Esc-cancel depends on this.

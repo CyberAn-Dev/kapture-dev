@@ -2718,18 +2718,32 @@ class MainWindow(QtWidgets.QWidget):
         self.status.setText(t("st_pinned_clip"))
 
     def _ensure_default_shortcuts(self):
-        """On GNOME, register DEFAULT_KEYS once so pin-to-clipboard works out of the box.
-        Skips actions already bound (never overwrites a user's own choice)."""
+        """Self-heal the GNOME shortcut registration (startup + one delayed retry).
+
+        Something outside Kapture keeps emptying the master custom-keybindings
+        array around login, which silently kills every shortcut even though the
+        per-action bindings stay stored (the recurring "Alt+` works only after
+        opening settings" symptom: saving in settings re-registers the paths).
+        Re-register every stored binding on startup — an existing binding is
+        rewritten with its own value (no-op for the user) and its path is put
+        back into the master array — then repeat once after the session settles
+        in case GNOME's login-time sync races and clobbers the array again.
+        Unbound actions in DEFAULT_KEYS are registered with their defaults;
+        a user's own choice is never overwritten.
+        """
         if shortcut_backend() != "gnome":
             return
         run_sh = _run_sh_path()
         entries = []
         for name, flag in SHORTCUT_ACTIONS:
-            if flag in DEFAULT_KEYS and not gnome_current_key(flag):
-                entries.append((name, flag, f"{run_sh} {flag}",
-                                gnome_accelerator(QtGui.QKeySequence(DEFAULT_KEYS[flag]))))
-        if entries:
-            gnome_set_shortcuts(entries)
+            key = gnome_current_key(flag)
+            if not key and flag in DEFAULT_KEYS:
+                key = gnome_accelerator(QtGui.QKeySequence(DEFAULT_KEYS[flag]))
+            entries.append((name, flag, f"{run_sh} {flag}", key))
+        gnome_set_shortcuts(entries)
+        if not getattr(self, "_shortcut_healed_once", False):
+            self._shortcut_healed_once = True
+            QtCore.QTimer.singleShot(6000, self._ensure_default_shortcuts)
 
     def _auto_save(self, img):
         import os
