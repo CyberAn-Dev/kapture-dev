@@ -189,6 +189,32 @@ class CanvasStitchTest(unittest.TestCase):
         self.assertLess(conf, 0.5)
 
 
+    def test_refine_snaps_mislocated_frame_to_seamless_stitch(self):
+        """A locate a few rows off (animated/teared frame) must be snapped back by
+        refine_frame_offset so appending adds NO duplicated rows — the per-scroll
+        "shadow band" was exactly those duplicated rows."""
+        page = self._page()
+        vh = 400
+        canvas = page[0:vh].copy()                   # canvas covers rows 0..400
+        true_top = 300
+        frame = page[true_top:true_top + vh]
+        for wrong_off in (5, -5, 2, -3):
+            c2, _ = kapture.stitch_frame(canvas, frame, true_top + wrong_off)
+            # whatever the mis-locate guessed, refine + stitch must land on page[:700]
+            y_ref = kapture.refine_frame_offset(canvas, frame, true_top + wrong_off)
+            self.assertEqual(y_ref, true_top, f"off={wrong_off} not corrected")
+            c3, _ = kapture.stitch_frame(canvas, frame, y_ref)
+            self.assertEqual(c3.shape[0], true_top + vh)
+            self.assertTrue(np.array_equal(c3, page[:true_top + vh]))
+
+    def test_refine_noop_on_exact_location(self):
+        page = self._page()
+        vh = 400
+        canvas = page[0:vh].copy()
+        frame = page[300:300 + vh]
+        self.assertEqual(kapture.refine_frame_offset(canvas, frame, 300), 300)
+
+
 class ScrollModeWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

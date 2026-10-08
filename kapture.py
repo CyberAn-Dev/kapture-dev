@@ -864,6 +864,35 @@ def stitch_frame(canvas_bgr, frame_bgr, y):
     return canvas_bgr, y
 
 
+def refine_frame_offset(canvas_bgr, frame_bgr, y, win=8, rows=160):
+    """Snap a located frame to the canvas by minimizing real pixel difference over
+    the overlap near the seam.
+
+    locate_frame matches a quarter-height strip, which is precise for static pages
+    but can still land a few rows off on animated or teared scroll frames; those
+    rows then duplicate or drop at the append point and read as a shadow band at
+    every scroll step. Checking y ± win against the rows both actually share fixes
+    the last few pixels for free (the overlap is already on hand)."""
+    ch, h = canvas_bgr.shape[0], frame_bgr.shape[0]
+    if win <= 0 or h > ch:
+        return y
+    cg = cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2GRAY).astype(np.int16)
+    fg = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.int16)
+    best_off, best_diff = 0, None
+    for off in range(-win, win + 1):
+        yy = y + off
+        lo = max(0, yy)                       # overlap on canvas coords
+        hi = min(ch, yy + h)
+        if hi - lo < min(rows, h) // 2:
+            continue
+        a = cg[lo:hi, :]
+        b = fg[lo - yy:hi - yy, :]
+        diff = int(np.abs(a[-rows:, :] - b[-rows:, :]).mean())
+        if best_diff is None or diff < best_diff:
+            best_off, best_diff = off, diff
+    return y + best_off
+
+
 def refine_new_start(prev_bgr, cur_bgr, new_start, win=16, strip=10):
     """Snap the guessed seam to the row where the current frame actually aligns with
     the bottom of the previous frame.
@@ -2750,6 +2779,7 @@ class MainWindow(QtWidgets.QWidget):
         cur = grab_region(*self._m_phys)
         y, conf = locate_frame(self._m_acc, cur, y_hint=self._m_y)
         if y is not None:
+            y = refine_frame_offset(self._m_acc, cur, y)
             self._m_acc, self._m_y = stitch_frame(self._m_acc, cur, y)
         if self._scroll_hud is not None:
             if self._m_acc.shape[0] > 1200:         # keep the letterbox resize cheap
