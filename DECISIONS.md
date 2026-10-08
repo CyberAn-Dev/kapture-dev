@@ -101,4 +101,4 @@
 
 ## Product documentation (2026-10-08)
 
-- Maintain matching English and Chinese product READMEs for this fork. Point installation and contribution links at CyberAn-Dev/kapture-dev while retaining upstream attribution. Document local package building without implying a published fork release; use actual current Qt widget captures with demonstration content and isolated settings for product screenshots. Describe supported behavior and practical limits rather than commit history or machine-specific setup.
+- Maintain matching English and Chinese product READMEs for this fork. Point installation and contribution links at CyberAn-Dev/kapture-dev while retaining upstream attribution. Document local package building without implying a published fork release; use actual current Qt widget captures with demonstration content and isolated settings for product screenshots. Lead with the Linux X11 PixPin-alternative positioning, inspired by the Flameshot README structure (https://github.com/flameshot-org/flameshot#readme). Keep independent upstream attribution and state that this is workflow coverage, not complete PixPin feature parity; retain concrete limitations.

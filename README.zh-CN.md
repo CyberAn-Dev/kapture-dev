@@ -1,10 +1,21 @@
+<div align="center">
+
+<img src="kapture.png" alt="Kapture Dev" width="88" />
+
 # Kapture Dev
 
-**面向 Linux X11 的截图、滚动长截图、OCR、标注与钉图工具。**
+**Linux 上的 PixPin 平替**
 
-本项目基于 [ycwei5/kapture](https://github.com/ycwei5/kapture)，新增双向滚动截图、OCR 取词、剪贴板图片钉图、窗口吸附、GNOME 快捷键恢复和更多主题。
+截图 · 长截图 · OCR 取词 · 钉图 · 标注 · 录屏
 
-[English](README.md)
+面向 Linux X11，把截图、提取文字和贴图参考放进同一个工作流。
+
+[English](README.md) · [快速开始](#快速开始) · [功能](#功能) · [反馈问题](https://github.com/CyberAn-Dev/kapture-dev/issues)
+
+![Platform](https://img.shields.io/badge/Linux-X11-3776ab)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+</div>
 
 <div align="center">
 
@@ -13,6 +24,13 @@
 <sub>当前编辑器：演示内容、图片标注与 OCR 结果。</sub>
 
 </div>
+
+## 熟悉的截图工作流
+
+- **截下来，标清楚**：框选或吸附窗口，添加箭头、序号和马赛克，复制分享。
+- **图片里的字，直接拿走**：截图自动 OCR，也可局部取词或框选屏幕直接复制文字。
+- **参考图，贴在手边**：钉住剪贴板图片，缩放、调透明度，一边看一边工作。
+- **一屏不够，继续滚动**：自动或手动采集长图，上下往返不重复追加已采集内容。
 
 ## 功能
 
@@ -28,19 +46,7 @@
 
 界面支持简体中文和英文。OCR 使用 Tesseract，录屏使用 ffmpeg。
 
-## 设置
-
-<div align="center">
-
-<img src="docs/images/settings.png" alt="Kapture Dev 设置" width="660" />
-
-<sub>配置快捷键、截图行为、OCR 与界面外观。</sub>
-
-</div>
-
-GNOME 启动时恢复已保存的快捷键，有冲突可在设置中修改。“后台启动”仅隐藏窗口，不等于登录自启。
-
-## 安装
+## 快速开始
 
 请使用 **X11** 会话。安装脚本面向使用 `apt` 的 Ubuntu 或 Kubuntu，需要联网。
 
@@ -66,6 +72,32 @@ sudo apt install ./dist/kapture_1.1.0_all.deb
 
 [上游 Releases](https://github.com/ycwei5/kapture/releases) 提供上游版本，可能不包含本 fork 的改动。
 
+<details>
+<summary>界面与设置</summary>
+
+<div align="center">
+
+<img src="docs/images/settings.png" alt="Kapture Dev 设置" width="660" />
+
+<sub>配置快捷键、截图行为、OCR 与界面外观。</sub>
+
+</div>
+
+GNOME 启动时恢复已保存的快捷键，有冲突可在设置中修改。“后台启动”仅隐藏窗口，不等于登录自启。
+
+</details>
+
+## 常用操作
+
+| 操作 | 按键 / 手势 |
+| --- | --- |
+| 钉住最近 / 上一张剪贴板图片 | Ctrl+1 / Ctrl+2（GNOME 默认，可修改） |
+| 缩放 / 调整钉图透明度 | 滚轮 / Ctrl+滚轮 |
+| 识别钉图文字 | O 或右键菜单 |
+| 停止长截图 / 关闭当前钉图 | Esc |
+
+钉图右键支持鼠标穿透；从托盘可恢复交互。剪贴板图片历史仅保留当前运行期间的最近 10 张。
+
 ## 命令行
 
 使用 `./run.sh <选项>` 执行一个操作，例如 `./run.sh --region`。
@@ -73,7 +105,9 @@ sudo apt install ./dist/kapture_1.1.0_all.deb
 - 截图：`--region`、`--window`、`--scroll`、`--manual`、`--repeat`
 - 其他：`--pin1`、`--pin2`、`--color`、`--record`、`--settings`、`--show`、`--background`
 
-## 使用限制
+## 与 PixPin 的区别
+
+Kapture Dev 是基于 [Kapture](https://github.com/ycwei5/kapture) 的独立开源项目，与 [PixPin](https://pixpin.cn/) 无隶属关系。“平替”指截图、长截图、OCR 与钉图等常用工作流，不代表功能完全一致。目前不提供 OCR 翻译、二维码识别或录屏音频。
 
 - 仅支持 X11，暂不支持 Wayland。GNOME 和 KDE Plasma 5 支持在应用内设置全局快捷键。
 - 长截图高度上限为 40,000 像素。动态页面、悬浮层、懒加载和重复内容会影响拼接；本功能不是浏览器整页导出。
