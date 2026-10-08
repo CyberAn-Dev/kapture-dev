@@ -239,6 +239,11 @@ TR = {
     "st_ocr_text": {"zh": "文字", "en": "text"},
     "st_ocr_none": {"zh": "未识别到文字", "en": "No text recognized"},
     "t_ocr": {"zh": "截屏取词", "en": "Screen text grab"},
+    "hud_stop": {"zh": "⏹ 停止", "en": "⏹ Stop"},
+    "hud_auto": {"zh": "自动滚动拼接中…请勿移动鼠标",
+                 "en": "Auto stitching… keep the mouse still"},
+    "hud_manual": {"zh": "手动滚动中…向下滚动目标窗口，完成后点停止",
+                   "en": "Manual scroll… scroll the target down, stop when done"},
     "t_ocr_all": {"zh": "全部识别", "en": "Recognize all"},
     "t_copy_all": {"zh": "全部复制", "en": "Copy all"},
     "card_edit": {"zh": "编辑标注", "en": "Edit annotations"},
@@ -813,6 +818,7 @@ def find_new_content(prev_bgr, cur_bgr, min_confidence=0.5):
 class CaptureWorker(QThread):
     """Run scrolling + frame grabbing + stitching on a background thread to avoid freezing the UI."""
     progress = pyqtSignal(str)
+    frame = pyqtSignal(object)        # latest stitched image for the live HUD preview
     finished_img = pyqtSignal(object)   # emits the stitched BGR numpy image, or None on failure
 
     def __init__(self, rect_phys, scroll_clicks=3, settle=0.45,
@@ -867,6 +873,14 @@ class CaptureWorker(QThread):
                     new_part = cur[new_start:, :]
                     accumulated = np.vstack([accumulated, new_part])
                     no_progress = 0
+                    # live HUD preview: downscale the stitched result so the queued
+                    # signal stays cheap even for very long captures
+                    prev_img = accumulated
+                    if accumulated.shape[0] > 1200:
+                        s = 1200.0 / accumulated.shape[0]
+                        prev_img = cv2.resize(
+                            accumulated, (max(1, int(accumulated.shape[1] * s)), 1200))
+                    self.frame.emit((prev_img, int(accumulated.shape[0])))
 
                 prev = cur
 
@@ -903,7 +917,7 @@ class RegionSelector(QtWidgets.QWidget):
     def __init__(self, mode="region"):
         super().__init__()
         self.mode = mode
-        # Bypass the window manager (like ManualBar/RecordBar/WindowPicker) so the
+        # Bypass the window manager (like ScrollHud/RecordBar/WindowPicker) so the
         # overlay covers the whole virtual desktop including the GNOME top bar and
         # dock; a WM-managed Qt.Tool window is clamped to the work area, which offset
         # the selection from the frozen full-geometry frame.
@@ -1060,44 +1074,81 @@ class RegionSelector(QtWidgets.QWidget):
 # --------------------------------------------------------------------------- #
 # Floating control bar for manual scrolling capture
 # --------------------------------------------------------------------------- #
-class ManualBar(QtWidgets.QWidget):
-    """Floating mini-window shown while recording a manual scrolling capture: shows the current long-image height + a stop button.
+class ScrollRegionOverlay(QtWidgets.QWidget):
+    """Transparent bypass-WM overlay outlining the scrolling-capture region in red.
 
-    It tries to stay outside the selected region so it doesn't get captured into the screenshot.
+    Click-through (mouse events fall through to the app underneath, so the user can
+    still scroll it); draws only the border so the region content stays fully visible.
     """
-    def __init__(self, region: QRect, on_stop):
+    def __init__(self, region: QRect, color="#e74c3c"):
         super().__init__()
-        self.setObjectName("ManualBar")
-        # Use a normal always-on-top window (not Qt.Tool): when the main window is minimized, Tool windows often don't show under KDE
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
-                            Qt.X11BypassWindowManagerHint)
-        self.setWindowTitle("Kapture recording")
-        lay = QtWidgets.QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 8)
-        self.dot = QtWidgets.QLabel("🔴")
-        self.lbl = QtWidgets.QLabel("Manual scroll… scroll the target window down, click stop when done")
-        self.btn = QtWidgets.QPushButton("⏹ Stop & stitch")
-        self.btn.clicked.connect(on_stop)
-        lay.addWidget(self.dot)
-        lay.addWidget(self.lbl)
-        lay.addWidget(self.btn)
-        self.setStyleSheet(
-            "#ManualBar{background:#2b2b2b;border:1px solid #c0392b;border-radius:8px;}"
-            "QLabel{color:#eee;font-size:13px;}"
-            "QPushButton{background:#c0392b;color:white;padding:5px 14px;"
-            "border-radius:4px;font-weight:bold;}")
-        self.adjustSize()
-        self._place(region)
-
-    def show_on_top(self):
+                            Qt.X11BypassWindowManagerHint | Qt.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        vg = QtWidgets.QApplication.primaryScreen().virtualGeometry()
+        self.setGeometry(vg)
+        self._rect = QRect(region)
+        self._rect.translate(-vg.topLeft())
+        self._color = QtGui.QColor(color)
         self.show()
         self.raise_()
-        self.activateWindow()
 
-    def _place(self, region: QRect):
+    def paintEvent(self, _):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        pen = QtGui.QPen(self._color, 3)
+        p.setPen(pen); p.setBrush(Qt.NoBrush)
+        p.drawRect(self._rect.adjusted(1, 1, -2, -2))
+
+
+class ScrollHud(QtWidgets.QWidget):
+    """PixPin-style HUD for scrolling captures: live stitched thumbnail, current
+    height/status, and a stop button. Shared by auto and manual modes; it stays
+    outside the selected region so it is never captured."""
+    THUMB_W = 150
+    THUMB_H = 240
+
+    def __init__(self, region: QRect, on_stop, mode="manual"):
+        super().__init__()
+        self._mode = mode
+        self.setObjectName("ScrollHud")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
+                            Qt.X11BypassWindowManagerHint)
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(10)
+        self.thumb = QtWidgets.QLabel()
+        self.thumb.setFixedSize(self.THUMB_W, self.THUMB_H)
+        self.thumb.setAlignment(Qt.AlignCenter)
+        self.thumb.setStyleSheet("background:#101014;border:1px solid #555;"
+                                 "border-radius:4px;color:#888;")
+        self.thumb.setText("…")
+        lay.addWidget(self.thumb)
+        col = QtWidgets.QVBoxLayout(); col.setSpacing(8)
+        self.lbl = QtWidgets.QLabel(t("hud_auto" if mode == "auto" else "hud_manual"))
+        self.lbl.setWordWrap(True)
+        self.btn = QtWidgets.QPushButton(t("hud_stop"))
+        self.btn.setCursor(Qt.PointingHandCursor)
+        self.btn.clicked.connect(on_stop)
+        col.addWidget(self.lbl)
+        col.addStretch(1)
+        col.addWidget(self.btn)
+        lay.addLayout(col)
+        self.setStyleSheet(
+            "#ScrollHud{background:#2b2b2b;border:1px solid #c0392b;border-radius:8px;}"
+            "QLabel{color:#eee;font-size:13px;}"
+            "QPushButton{background:#c0392b;color:white;padding:6px 16px;"
+            "border-radius:4px;font-weight:bold;}"
+            "QPushButton:hover{background:#e05a4b;}")
+        self._region = QRect(region)
+        self.adjustSize()
+        self._place()
+
+    def _place(self):
         vg = QtWidgets.QApplication.primaryScreen().virtualGeometry()
+        region = self._region
         bw, bh = self.width(), self.height()
-        # Prefer below the region, then above, then to the right, finally fall back to the top-left of the virtual desktop
         if region.bottom() + 8 + bh <= vg.bottom():
             x, y = region.left(), region.bottom() + 8
         elif region.top() - 8 - bh >= vg.top():
@@ -1108,8 +1159,32 @@ class ManualBar(QtWidgets.QWidget):
             x, y = vg.left() + 8, vg.top() + 8
         self.move(int(x), int(y))
 
-    def set_height(self, h):
-        self.lbl.setText(f"Manual scroll… height {h} px (click stop when done)")
+    def show_on_top(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def set_image(self, payload):
+        """Show the latest stitched result, letterboxed into the thumbnail.
+
+        payload is (bgr, height_px) or a plain BGR image (manual mode passes the
+        full accumulated image directly, so its height is taken from the array).
+        """
+        try:
+            bgr, h = payload if isinstance(payload, tuple) else (payload, payload.shape[0])
+            w = bgr.shape[1]
+            scale = min(self.THUMB_W / w, self.THUMB_H / h, 1.0)
+            rgb = cv2.resize(bgr, (max(1, int(w * scale)), max(1, int(h * scale))))
+            pm = QtGui.QPixmap.fromImage(bgr_to_qimage(rgb))
+            self.thumb.setPixmap(pm)
+            self._h = h
+            self._refresh_height()
+        except Exception:                              # noqa: BLE001 — HUD never breaks capture
+            pass
+
+    def _refresh_height(self):
+        base = t("hud_auto" if getattr(self, "_mode", None) == "auto" else "hud_manual")
+        self.lbl.setText(f"{base} · {getattr(self, '_h', 0)} px")
 
 
 # --------------------------------------------------------------------------- #
@@ -2054,23 +2129,28 @@ class MainWindow(QtWidgets.QWidget):
         layout.addWidget(self.scroll, 3)
 
         # ---------- OCR text result ---------- #
-        ocr_box = QtWidgets.QWidget()
-        ocr_lay = QtWidgets.QVBoxLayout(ocr_box)
-        ocr_lay.setContentsMargins(0, 0, 0, 0)
-        ocr_lay.setSpacing(4)
         self.text = QtWidgets.QPlainTextEdit()
-        ocr_lay.addWidget(self.text)
-        btn_row = QtWidgets.QHBoxLayout(); btn_row.setSpacing(6)
+        layout.addWidget(self.text, 2)
+        # 全部识别 / 全部复制 float inside the OCR box bottom-left and appear only
+        # once the box holds recognized text (children of the viewport, repositioned
+        # on resize via the event filter below).
+        self._ocr_btns = QtWidgets.QWidget(self.text.viewport())
+        br = QtWidgets.QHBoxLayout(self._ocr_btns)
+        br.setContentsMargins(6, 4, 6, 4); br.setSpacing(6)
         self.btn_ocr_all = QtWidgets.QPushButton()
         self.btn_copy_all = QtWidgets.QPushButton()
         for b in (self.btn_ocr_all, self.btn_copy_all):
-            b.setFixedHeight(26)
+            b.setFixedHeight(24)
             b.setCursor(Qt.PointingHandCursor)
-        btn_row.addWidget(self.btn_ocr_all)
-        btn_row.addWidget(self.btn_copy_all)
-        btn_row.addStretch(1)          # buttons hug the bottom-left of the OCR box
-        ocr_lay.addLayout(btn_row)
-        layout.addWidget(ocr_box, 2)
+        br.addWidget(self.btn_ocr_all)
+        br.addWidget(self.btn_copy_all)
+        br.addStretch(1)
+        self._ocr_btns.setStyleSheet(
+            "background:rgba(42,42,49,200);border-radius:6px;"
+            "QPushButton{background:#3a3a44;color:#e8e8ec;border:1px solid #4a4a55;"
+            "border-radius:4px;padding:2px 10px;}"
+            "QPushButton:hover{background:#4a4a56;}")
+        self.text.viewport().installEventFilter(self)
 
         self.status = QtWidgets.QLabel()
         self.status.setObjectName("status")
@@ -2087,6 +2167,8 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_ocr.clicked.connect(lambda: self.run_ocr())
         self.btn_ocr_all.clicked.connect(lambda: self.run_ocr(copy_result=False))
         self.btn_copy_all.clicked.connect(self._copy_all_text)
+        self.text.textChanged.connect(self._update_ocr_btns)   # buttons follow content
+        self._update_ocr_btns()
         self.btn_copy.clicked.connect(self.copy_image)
         self.btn_pin.clicked.connect(self.pin_image)
         self.btn_save.clicked.connect(self.save_image)
@@ -2350,7 +2432,7 @@ class MainWindow(QtWidgets.QWidget):
         elif self._mode == "manual":
             QtCore.QTimer.singleShot(150, lambda: self._manual_start(phys, gr))
         else:
-            QtCore.QTimer.singleShot(150, lambda: self._scroll_shot(phys, dpr))
+            QtCore.QTimer.singleShot(150, lambda: self._scroll_shot(phys, dpr, gr))
 
     def _single_shot(self, phys, frozen=None):
         self._last_phys = phys              # remember it for "repeat last area"
@@ -2494,15 +2576,34 @@ class MainWindow(QtWidgets.QWidget):
         self._restore()
         self.status.setText(f"Picked {hexv}  rgb{rgb}, copied to clipboard")
 
-    def _scroll_shot(self, phys, dpr):
+    def _scroll_shot(self, phys, dpr, gr=None):
         self.status.setText("Scrolling capture… please don't move the mouse")
+        if gr is not None:
+            self._scroll_overlay = ScrollRegionOverlay(gr)
+        self._scroll_hud = ScrollHud(gr or QRect(*phys), self._auto_scroll_stop, mode="auto")
+        self._scroll_hud.show_on_top()
         self.worker = CaptureWorker(phys, scroll_clicks=self.speed.value())
         self.worker.dpr = dpr
         self.worker.progress.connect(self.status.setText)
+        self.worker.frame.connect(self._scroll_hud.set_image)
         self.worker.finished_img.connect(self._on_capture_done)
         self.worker.start()
 
+    def _close_scroll_hud(self):
+        for attr in ("_scroll_hud", "_scroll_overlay"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.close()
+                w.deleteLater()
+            setattr(self, attr, None)
+
+    def _auto_scroll_stop(self):
+        """HUD stop button: abort the worker; it emits the partial stitched image."""
+        if self.worker is not None:
+            self.worker.abort()
+
     def _on_capture_done(self, img):
+        self._close_scroll_hud()
         if img is None:
             self.status.setText("Capture failed, see the message above")
             self._restore()
@@ -2515,13 +2616,16 @@ class MainWindow(QtWidgets.QWidget):
             self._m_phys = phys
             self._m_acc = grab_region(*phys)
             self._m_prev = self._m_acc.copy()
-            self._m_bar = ManualBar(gr, on_stop=self._manual_stop)
-            self._m_bar.show_on_top()
+            self._scroll_overlay = ScrollRegionOverlay(gr)
+            self._scroll_hud = ScrollHud(gr, self._manual_stop, mode="manual")
+            self._scroll_hud.show_on_top()
+            self._scroll_hud.set_image(self._m_acc)
             self._m_timer = QtCore.QTimer(self)
             self._m_timer.setInterval(250)          # grab a frame every 250 ms
             self._m_timer.timeout.connect(self._manual_tick)
             self._m_timer.start()
         except Exception as exc:                    # noqa: BLE001
+            self._close_scroll_hud()
             self._restore()
             QtWidgets.QMessageBox.critical(self, "Manual capture failed to start", str(exc))
 
@@ -2533,17 +2637,22 @@ class MainWindow(QtWidgets.QWidget):
         if conf >= 0.45 and new_start < cur.shape[0] - 2:
             self._m_acc = np.vstack([self._m_acc, cur[new_start:, :]])
         self._m_prev = cur
-        self._m_bar.set_height(self._m_acc.shape[0])
+        if self._scroll_hud is not None:
+            if self._m_acc.shape[0] > 1200:         # keep the letterbox resize cheap
+                s = 1200.0 / self._m_acc.shape[0]
+                small = cv2.resize(self._m_acc,
+                                   (max(1, int(self._m_acc.shape[1] * s)), 1200))
+            else:
+                small = self._m_acc
+            self._scroll_hud.set_image(small)
         if self._m_acc.shape[0] >= self.MANUAL_MAX_H:
-            self._m_bar.set_height(self._m_acc.shape[0])
             self.status.setText("Max length reached, stitching stopped automatically")
             self._manual_stop()
 
     def _manual_stop(self):
         if getattr(self, "_m_timer", None):
             self._m_timer.stop()
-        if getattr(self, "_m_bar", None):
-            self._m_bar.close()
+        self._close_scroll_hud()
         self._present_capture(
             self._m_acc,
             f"Manual capture done: {self._m_acc.shape[1]}×{self._m_acc.shape[0]} px")
@@ -2766,7 +2875,22 @@ class MainWindow(QtWidgets.QWidget):
     def eventFilter(self, obj, ev):
         if obj is self.text and ev.type() == QtCore.QEvent.Resize:
             self._place_toast()
+        elif obj is self.text.viewport() and ev.type() == QtCore.QEvent.Resize:
+            self._place_ocr_btns()
         return super().eventFilter(obj, ev)
+
+    def _place_ocr_btns(self):
+        """Pin the OCR button strip to the bottom-left inside the OCR box viewport."""
+        vp = self.text.viewport()
+        self._ocr_btns.adjustSize()
+        self._ocr_btns.move(6, max(0, vp.height() - self._ocr_btns.height() - 6))
+
+    def _update_ocr_btns(self):
+        """Show 全部识别/全部复制 only while the OCR box actually holds text."""
+        has = bool(self.text.toPlainText().strip())
+        self._ocr_btns.setVisible(has)
+        if has:
+            self._place_ocr_btns()
 
     def _do_crop(self, rectf):
         if self.image_bgr is None:

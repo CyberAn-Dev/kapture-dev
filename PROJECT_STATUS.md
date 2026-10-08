@@ -39,6 +39,9 @@
 - Persistent autostart installed: `kapture.service` (dev repo `run.sh --background`, `WantedBy=graphical-session.target`, `PassEnvironment` instead of a hard-coded DISPLAY) is enabled and running; the transient manual instance was retired. Single-instance forwarding, session-bus and display access verified live.
 - The `_bring_to_front` tray-restore fix is now live-verified: `--settings`/`--show` (the exact code path the tray's Trigger uses) raised and focused the windows in the real GNOME/X11 session (`_NET_WM_STATE_FOCUSED` observed). A physical tray click on the GNOME top bar remains the only unexercised input, but it executes the same handler.
 - Full offscreen suite: 49 tests green (7 textgrab-mode cases, 6 cursor/OCR-box-button cases).
+- 全部识别/全部复制 moved inside the OCR box bottom-left (children of the text viewport, repositioned on resize) and now appear only while the box holds recognized text.
+- Scrolling captures (auto + manual) got a PixPin-style HUD: red click-through region outline plus a floating panel with a live downsampled thumbnail, current stitched height, and a stop button. Auto mode previously gave no on-screen feedback at all (progress went to the hidden status label); its worker now emits a `frame` signal and the HUD stop aborts the worker, which emits the partial image. ManualBar was replaced by the shared `ScrollHud`. 59 tests green (10 new).
+- 美化导出 (beautify export) confirmed functional but niche: it composites the annotated screenshot onto a pink/violet gradient with rounded corners and shadow and saves a PNG (macOS-style share image). Handling undecided — awaiting user decision.
 
 ## Blockers and next step
 
