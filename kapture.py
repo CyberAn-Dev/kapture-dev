@@ -1090,10 +1090,13 @@ class ScrollRegionOverlay:
         self._wins = []
         r = QRect(region)
         t = self.THICK
-        bars = (QRect(r.left() - t, r.top() - t, r.width() + 2 * t, t),      # top
-                QRect(r.left() - t, r.bottom(), r.width() + 2 * t, t),       # bottom
-                QRect(r.left() - t, r.top(), t, r.height()),                 # left
-                QRect(r.right(), r.top(), t, r.height() + t))                # right
+        # NOTE: QRect.right()/bottom() are the LAST INSIDE pixel (left+width-1);
+        # the bottom/right strips must start one past them or they overlap the
+        # region and get captured into the long screenshot (red edge bug).
+        bars = (QRect(r.left() - t, r.top() - t, r.width() + 2 * t, t),          # top
+                QRect(r.left() - t, r.top() + r.height(), r.width() + 2 * t, t),  # bottom
+                QRect(r.left() - t, r.top(), t, r.height()),                     # left
+                QRect(r.right() + 1, r.top(), t, r.height()))                    # right
         for rect in bars:
             w = _BorderStrip(rect, color)
             self._wins.append(w)

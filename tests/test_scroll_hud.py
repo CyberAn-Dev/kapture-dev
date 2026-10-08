@@ -106,9 +106,11 @@ class ScrollHudTest(unittest.TestCase):
             self.assertLessEqual(w.width(), region.width() + 2 * kapture.ScrollRegionOverlay.THICK)
             self.assertLessEqual(w.height(), region.height() + 2 * kapture.ScrollRegionOverlay.THICK)
             self.assertTrue(vg.contains(w.geometry()))
-            # no strip may overlap the capture region itself (inner edge touches it)
-            inter = w.geometry().intersected(region)
-            self.assertTrue(inter.isEmpty() or inter.width() <= 1 or inter.height() <= 1)
+            # no strip may cover ANY pixel of the capture region — QRect's
+            # right()/bottom() are last-inside, off-by-one here captured the red
+            # edge into the long screenshot once already
+            self.assertTrue(w.geometry().intersected(region).isEmpty(),
+                            msg=f"strip {w.geometry()} overlaps region {region}")
         ov.close()
         self.assertFalse(ov.isVisible())
 
