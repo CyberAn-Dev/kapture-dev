@@ -815,6 +815,32 @@ def find_new_content(prev_bgr, cur_bgr, min_confidence=0.5):
     return new_start, max_val
 
 
+def refine_new_start(prev_bgr, cur_bgr, new_start, win=16, strip=10):
+    """Snap the guessed seam to the row where the current frame actually aligns with
+    the bottom of the previous frame.
+
+    Template matching is only accurate to the whole search and animated scrolling
+    tears frames; a seam off by a few rows duplicates or drops content and shows up
+    as a shadow-like band at every scroll step. Sliding the boundary within ±win and
+    taking the position whose strip above it best matches the previous bottom removes
+    that. Returns a row in cur_bgr just like find_new_content()."""
+    h, w = prev_bgr.shape[:2]
+    if new_start - strip < 0 or new_start + win >= cur_bgr.shape[0] or strip > h:
+        return new_start
+    prev_g = cv2.cvtColor(prev_bgr, cv2.COLOR_BGR2GRAY)
+    cur_g = cv2.cvtColor(cur_bgr, cv2.COLOR_BGR2GRAY)
+    anchor = prev_g[h - strip:h, :].astype(np.int16)
+    best_diff, best_d = None, 0
+    for d in range(-win, win + 1):
+        y = new_start - strip + d
+        if y < 0 or y + strip > cur_g.shape[0]:
+            continue
+        diff = int(np.abs(cur_g[y:y + strip, :].astype(np.int16) - anchor).sum())
+        if best_diff is None or diff < best_diff:
+            best_diff, best_d = diff, d
+    return new_start + best_d if best_diff is not None else new_start
+
+
 class CaptureWorker(QThread):
     """Run scrolling + frame grabbing + stitching on a background thread to avoid freezing the UI."""
     progress = pyqtSignal(str)
@@ -870,6 +896,7 @@ class CaptureWorker(QThread):
                     # No new content -- most likely reached the bottom
                     no_progress += 1
                 else:
+                    new_start = refine_new_start(prev, cur, new_start)
                     new_part = cur[new_start:, :]
                     accumulated = np.vstack([accumulated, new_part])
                     no_progress = 0
@@ -2665,6 +2692,7 @@ class MainWindow(QtWidgets.QWidget):
         cur = grab_region(*self._m_phys)
         new_start, conf = find_new_content(self._m_prev, cur)
         if conf >= 0.45 and new_start < cur.shape[0] - 2:
+            new_start = refine_new_start(self._m_prev, cur, new_start)
             self._m_acc = np.vstack([self._m_acc, cur[new_start:, :]])
         self._m_prev = cur
         if self._scroll_hud is not None:

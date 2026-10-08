@@ -115,6 +115,35 @@ class ScrollHudTest(unittest.TestCase):
         self.assertFalse(ov.isVisible())
 
 
+class SeamRefineTest(unittest.TestCase):
+    """find_new_content + refine_new_start must place the seam exactly: a seam off
+    by a few rows duplicates/drops content and reads as a shadow band at every
+    scroll step (user-reported on stitched long images)."""
+
+    def _frames(self, h=400, w=300, shift=100, seed=7):
+        rng = np.random.RandomState(seed)
+        img = rng.randint(0, 256, (h * 4, w, 3), dtype=np.uint8)
+        prev = img[0:h]
+        cur = img[shift:shift + h]
+        return prev, cur, h - shift          # true seam row in cur
+
+    def test_match_plus_refine_recovers_exact_seam(self):
+        prev, cur, true_start = self._frames()
+        start, conf = kapture.find_new_content(prev, cur)
+        self.assertGreaterEqual(conf, 0.9)
+        self.assertEqual(start, true_start)  # ideal frames: already exact
+        # simulate a mis-estimate (animated/teared frame off by a few rows)
+        wrong = true_start + 6
+        self.assertEqual(kapture.refine_new_start(prev, cur, wrong), true_start)
+        wrong = true_start - 4
+        self.assertEqual(kapture.refine_new_start(prev, cur, wrong), true_start)
+
+    def test_refine_passthrough_at_bounds(self):
+        prev, cur, _ = self._frames()
+        self.assertEqual(kapture.refine_new_start(prev, cur, 3), 3)      # near top
+        self.assertEqual(kapture.refine_new_start(prev, cur, 395), 395)  # near bottom
+
+
 class ScrollModeWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
