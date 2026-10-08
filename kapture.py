@@ -1699,6 +1699,25 @@ def ungrabbed_dialog(dialog, *args, **kwargs):
             grabber.grabKeyboard()
 
 
+class CanvasTextInput(QtWidgets.QLineEdit):
+    """Native text/IME editing at an annotation's position, without a dialog."""
+    def event(self, event):
+        if event.type() == QtCore.QEvent.ShortcutOverride:
+            event.accept()
+            return True
+        return super().event(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape):
+            self.parent()._finish_text(event.key() != Qt.Key_Escape)
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.parent()._finish_text()
+
+
 class AnnotateCanvas(QtWidgets.QWidget):
     """Display the screenshot and allow drawing rectangles/ellipses/arrows/lines/pen/text on it.
 
@@ -1712,6 +1731,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def __init__(self):
         super().__init__()
+        self._text_editor = None
+        self._text_index = None
         self.base = None            # QImage, the original screenshot
         self.items = []             # completed annotations
         self.cur = None             # annotation currently being drawn
@@ -1737,6 +1758,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     # --- External interface --- #
     def set_image_bgr(self, bgr):
+        self._finish_text(False)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         h, w, _ = rgb.shape
         self.base = QtGui.QImage(rgb.data, w, h, 3 * w,
@@ -1773,6 +1795,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.update()
 
     def set_tool(self, name):
+        self._finish_text()
         self.tool = name
         self._selected_item = None
         self._drag_start = self._drag_item = self._drag_before = None
@@ -1827,12 +1850,14 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def snapshot_document(self):
         """Copy the image, annotations, and history for editor handoff."""
+        self._finish_text()
         state = self._content_state()
         state["undo"] = [self._copy_content_state(item) for item in self._undo_stack]
         state["redo"] = [self._copy_content_state(item) for item in self._redo_stack]
         return state
 
     def _restore_content(self, state):
+        self._finish_text(False)
         copied = self._copy_content_state(state)
         self.base = copied["base"]
         self.items = copied["items"]
@@ -1872,6 +1897,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
                 and isinstance(self.items[self._selected_item], dict))
 
     def undo(self):
+        self._finish_text()
         if self._undo_stack:
             current = self._content_state()
             previous = self._undo_stack.pop()
@@ -1889,6 +1915,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
             self.changed.emit()
 
     def redo(self):
+        self._finish_text()
         if not self._redo_stack:
             return
         current = self._content_state()
@@ -1901,6 +1928,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.changed.emit()
 
     def clear_items(self):
+        self._finish_text()
         if not self.items:
             return
         before = self._content_state()
@@ -1919,6 +1947,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def crop_image(self, rect):
         """Crop the base image and translate annotations; return whether it changed."""
+        self._finish_text()
         if self.base is None:
             return False
         bounds = QtCore.QRectF(rect).normalized().toAlignedRect().intersected(self.base.rect())
@@ -1937,6 +1966,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def clear(self):
         """Clear the canvas (back to the no-screenshot state)."""
+        self._finish_text(False)
         if self.base is None and not self.items:
             return
         before = self._content_state()
@@ -1953,6 +1983,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def render_flattened(self):
         """Return a QImage with annotations baked in (1:1 pixels)."""
+        self._finish_text()
         if self.base is None:
             return None
         out = self.base.copy()
@@ -1979,8 +2010,9 @@ class AnnotateCanvas(QtWidgets.QWidget):
         p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
         p.scale(self.scale, self.scale)
         p.drawImage(0, 0, self.base)
-        for it in self.items:
-            self._draw_item(p, it)
+        for index, it in enumerate(self.items):
+            if self._text_editor is None or index != self._text_index:
+                self._draw_item(p, it)
         if self.cur:
             self._draw_item(p, self.cur)
         if (self.tool == "select" and self._valid_selection()):
@@ -2213,14 +2245,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
             self.update()
             return
         if self.tool == "text":
-            txt, ok = ungrabbed_dialog(QtWidgets.QInputDialog.getText, self, "Add text", "Text:",
-                flags=self._text_dialog_flags())
-            if ok and txt:
-                before = self._content_state()
-                self.items.append({"type": "text", "a": pt, "text": txt,
-                                   "color": QtGui.QColor(self.color),
-                                   "width": self.width})
-                self._commit_change(before)
+            self._start_text(pt)
             return
         if self.tool == "number":
             n = 1 + max([it["n"] for it in self.items
@@ -2301,13 +2326,54 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.cur = None
         self._commit_change(before)
 
-    def _text_dialog_flags(self):
-        # Xorg keeps override-redirect capture windows above WM-managed dialogs.
-        # Match that stacking layer so the text prompt remains visible.
-        flags = Qt.Dialog
-        if self.window().windowFlags() & Qt.X11BypassWindowManagerHint:
-            flags |= Qt.X11BypassWindowManagerHint | Qt.WindowStaysOnTopHint
-        return flags
+    def _start_text(self, point, index=None):
+        self._finish_text()
+        self._text_index = index
+        self._text_item = (self._copy_item(self.items[index]) if index is not None else
+                           {"type": "text", "a": point, "text": "",
+                            "color": QtGui.QColor(self.color), "width": self.width})
+        item = self._text_item
+        editor = CanvasTextInput(self)
+        self._text_editor = editor
+        size = max(1, round(max(12, item["width"] * 6) * self.scale))
+        editor.setStyleSheet("QLineEdit { background: transparent; border: 1px dashed #808080;"
+                            f"color: {item['color'].name()}; font-size: {size}px; padding: 0px; }}")
+        editor.setTextMargins(0, 0, 0, 0)
+        editor.setText(item["text"])
+        metrics = editor.fontMetrics()
+        x = max(0, min(round(item["a"].x()*self.scale)-2, self.size().width()-24))
+        y = max(0, round(item["a"].y()*self.scale)-metrics.ascent()-2)
+        editor.setGeometry(x, y, max(24, self.size().width()-x), metrics.height()+4)
+        editor.show(); editor.raise_(); editor.setFocus(Qt.MouseFocusReason)
+        editor.selectAll()
+        self.update()
+
+    def _finish_text(self, commit=True):
+        editor = self._text_editor
+        if editor is None:
+            return
+        self._text_editor = None
+        index = self._text_index
+        self._text_index = None
+        text = editor.text()
+        item = self._text_item
+        if QtWidgets.QWidget.keyboardGrabber() is editor:
+            editor.releaseKeyboard()
+        editor.hide(); editor.deleteLater()
+        if commit and text != item["text"]:
+            before = self._content_state()
+            item["text"] = text
+            if index is not None:
+                if text:
+                    self.items[index] = item
+                else:
+                    del self.items[index]
+                    self._selected_item = None
+            elif text:
+                self.items.append(item)
+            self._commit_change(before)
+        self.setFocus(Qt.OtherFocusReason)
+        self.update()
 
     def mouseDoubleClickEvent(self, e):
         if self.base is None or self.tool != "select":
@@ -2316,13 +2382,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
         if index is None or self.items[index].get("type") != "text":
             return
         self._selected_item = index
-        item = self.items[index]
-        text, ok = ungrabbed_dialog(QtWidgets.QInputDialog.getText,
-            self, "Edit text", "Text:", QtWidgets.QLineEdit.Normal, item.get("text", ""), flags=self._text_dialog_flags())
-        if ok and text != item.get("text", ""):
-            before = self._content_state()
-            item["text"] = text
-            self._commit_change(before)
+        self._start_text(self.items[index]["a"], index)
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):

@@ -115,4 +115,4 @@
 
 - User scope: target Xorg/X11 only; Wayland is not a planned requirement. Run the existing changes through the desktop user service without resetting settings/history, and deliver after the user-authorized text-entry correction.
 
-- Xorg inline text dialogs use the same bypass-window-manager stacking layer as the capture overlay. Retain normal managed dialogs in the full editor; verify visibility and real keyboard input instead of only setting dialog values programmatically.
+- Text input uses a native QLineEdit child of the shared canvas, preserving IME and text shortcuts. Commit each editing session as one annotation undo step; exports and document handoffs finish pending text. This replaces modal text dialogs on all editing surfaces.

@@ -56,29 +56,30 @@ def run():
                 (QtCore.QEvent.MouseButtonRelease,(600,90),QtCore.Qt.LeftButton,QtCore.Qt.NoButton)]:
                 app.sendEvent(editor.canvas,QtGui.QMouseEvent(typ,QtCore.QPointF(*pt),button,buttons,QtCore.Qt.NoModifier))
             assert len(editor.canvas.items)==1
-            observed=[]
-            def type_text():
-                dialog=app.activeModalWidget()
-                observed.append(QtWidgets.QWidget.keyboardGrabber() is None)
-                from Xlib import display, X
-                from Xlib.ext import xtest
-                connection=display.Display()
-                root=connection.screen().root
-                top=connection.create_resource_object('window',int(dialog.winId()))
-                while top.query_tree().parent.id != root.id:
-                    top=top.query_tree().parent
-                stack=[child.id for child in root.query_tree().children]
-                observed.append(stack.index(top.id)>stack.index(int(editor.winId())))
-                key=connection.keysym_to_keycode(ord('a'))
-                xtest.fake_input(connection,X.KeyPress,key)
-                xtest.fake_input(connection,X.KeyRelease,key);connection.sync()
-                QtTest.QTest.qWait(100)
-                observed.append(dialog.textValue() == 'a')
-                dialog.accept();connection.close()
-            QtCore.QTimer.singleShot(80,type_text)
             editor.tools.buttons['text'].click()
             QtTest.QTest.mouseClick(editor.canvas,QtCore.Qt.LeftButton,pos=QtCore.QPoint(100,220))
-            assert observed == [True,True,True], 'Text dialog must receive real keys and appear above capture overlay'
+            field=editor.canvas._text_editor
+            assert field is not None and field.isVisible()
+            assert app.activeModalWidget() is None
+            from Xlib import display, X, XK
+            from Xlib.ext import xtest
+            connection=display.Display()
+            def real_key(keysym):
+                key=connection.keysym_to_keycode(keysym)
+                xtest.fake_input(connection,X.KeyPress,key)
+                xtest.fake_input(connection,X.KeyRelease,key)
+                connection.sync();QtTest.QTest.qWait(80)
+            real_key(ord('a'))
+            assert field.text() == 'a', 'Inline input must receive actual X11 keys'
+            # Exercise the same native input-method commit used by Chinese IMEs.
+            event=QtGui.QInputMethodEvent();event.setCommitString('中文')
+            app.sendEvent(field,event)
+            assert field.text() == 'a中文'
+            real_key(XK.XK_Return)
+            connection.close()
+            assert editor.isVisible(), 'Enter finishes text, not the capture'
+            assert editor.canvas._text_editor is None
+            assert editor.canvas.items[-1]['text'] == 'a中文'
             assert len(editor.canvas.items)==2
             editor.grab().save('/tmp/kapture-inline-x11.png')
             editor.finish('editor');QtTest.QTest.qWait(100)
@@ -91,7 +92,7 @@ def run():
             assert len(pin.canvas.items)==2
             pin.canvas.undo();assert len(pin.canvas.items)==1
             pin.close()
-            print('PASS: actual X11 selection pixels, inline annotations, modal text keyboard, editor/pin handoff, undo/redo')
+            print('PASS: actual X11 selection pixels, inline annotations, in-place text and input-method commit, editor/pin handoff, undo/redo')
         finally:
             if window._inline_editor is not None: window._inline_editor.close()
             selector.close();page.close();window.close();window.tray.hide()

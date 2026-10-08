@@ -135,14 +135,40 @@ class CanvasEditingTest(unittest.TestCase):
             "color": QtGui.QColor("red"), "width": 3,
         })
         self.canvas.set_tool("select")
-        with mock.patch.object(QtWidgets.QInputDialog, "getText",
-                               return_value=("Changed", True)) as get_text:
-            self._mouse(QtCore.QEvent.MouseButtonDblClick, (22, 50),
-                        QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
-        get_text.assert_called_once()
+        self._mouse(QtCore.QEvent.MouseButtonDblClick, (22, 50),
+                    QtCore.Qt.LeftButton, QtCore.Qt.LeftButton)
+        editor = self.canvas._text_editor
+        self.assertIsNotNone(editor)
+        editor.selectAll()
+        QtTest.QTest.keyClicks(editor, "Changed")
+        QtTest.QTest.keyClick(editor, QtCore.Qt.Key_Return)
         self.assertEqual(self.canvas.items[0]["text"], "Changed")
         self.canvas.undo()
         self.assertEqual(self.canvas.items[0]["text"], "Edit")
+
+    def test_text_is_typed_on_canvas_and_export_commits_it(self):
+        self.canvas.set_tool("text")
+        QtTest.QTest.mouseClick(self.canvas, QtCore.Qt.LeftButton, pos=QtCore.QPoint(20, 60))
+        editor = self.canvas._text_editor
+        self.assertIs(editor.parent(), self.canvas)
+        self.assertIsNone(self.app.activeModalWidget())
+        QtTest.QTest.keyClicks(editor, "Live text")
+        self.assertEqual(editor.text(), "Live text")
+        self.canvas.render_flattened()
+        self.assertEqual(self.canvas.items[0]["text"], "Live text")
+        self.canvas.undo()
+        self.assertEqual(self.canvas.items, [])
+        self.canvas.redo()
+        self.assertEqual(self.canvas.items[0]["text"], "Live text")
+
+    def test_escape_cancels_inline_text_without_closing_canvas(self):
+        self.canvas.set_tool("text")
+        QtTest.QTest.mouseClick(self.canvas, QtCore.Qt.LeftButton, pos=QtCore.QPoint(20, 60))
+        QtTest.QTest.keyClicks(self.canvas._text_editor, "Discard")
+        QtTest.QTest.keyClick(self.canvas._text_editor, QtCore.Qt.Key_Escape)
+        self.assertIsNone(self.canvas._text_editor)
+        self.assertEqual(self.canvas.items, [])
+        self.assertTrue(self.canvas.isVisible())
 
     def test_selection_decoration_is_not_flattened_into_export(self):
         self._draw_rect()
