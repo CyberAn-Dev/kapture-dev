@@ -99,7 +99,7 @@ cat > "$ROOT/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
 VENV=/opt/kapture/.venv
-PKGS="PyQt5 mss opencv-python-headless numpy pillow pynput pytesseract"
+PKGS="PyQt5 mss opencv-python-headless numpy pillow pynput python-xlib pytesseract"
 
 if [ ! -x "$VENV/bin/python" ]; then
     echo "Kapture: creating Python environment (requires network)…"

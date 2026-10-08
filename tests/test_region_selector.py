@@ -74,6 +74,92 @@ class RegionSelectorTest(unittest.TestCase):
                                     QtCore.Qt.NoModifier))
         self.assertEqual(cancelled, [True])
 
+    # --- window snapping ---------------------------------------------------- #
+
+    def test_snap_point_snaps_nearest_within_threshold(self):
+        sx, sy, gx, gy = kapture.snap_point(103, 50, [100, 200], [80], threshold=10)
+        self.assertEqual((sx, sy), (100, 50))                    # x snapped, y had no guide
+        self.assertEqual((gx, gy), (100, None))
+        sx, sy, gx, gy = kapture.snap_point(130, 50, [100], [80], threshold=10)
+        self.assertEqual((sx, sy, gx, gy), (130, 50, None, None))  # both out of range
+        sx, _, gx, _ = kapture.snap_point(104, 0, [100, 106], [], threshold=10)
+        self.assertEqual((sx, gx), (106, 106))                   # nearest wins
+
+    def test_hit_window_picks_topmost(self):
+        low = QtCore.QRect(0, 0, 200, 200)
+        high = QtCore.QRect(50, 50, 100, 100)
+        # Top-to-bottom order: the smaller upper window comes first in the list.
+        self.assertEqual(kapture.RegionSelector.hit_window([high, low], QtCore.QPoint(60, 60)), high)
+        self.assertEqual(kapture.RegionSelector.hit_window([high, low], QtCore.QPoint(10, 10)), low)
+        self.assertIsNone(kapture.RegionSelector.hit_window([high, low], QtCore.QPoint(300, 300)))
+
+    def test_loupe_geometry_uses_integer_steps(self):
+        sel = self._make()
+        for dpr in (1.0, 1.5, 2.0):
+            sel.dpr = dpr
+            s, src_px, side = sel._loupe_geometry()
+            self.assertIsInstance(s, int)
+            self.assertGreaterEqual(s, 1)
+            self.assertEqual(side, src_px * s)                   # grid lands on cell edges
+
+    def _selector_with_windows(self, rects):
+        sel = self._make()
+        sel.snap = True
+        sel._wins = list(rects)
+        sel.setGeometry(0, 0, 800, 600)                          # full virtual desktop
+        return sel
+
+    def _press_move_release(self, sel, press_at, move_to):
+        from PyQt5.QtGui import QMouseEvent
+        Qt = QtCore.Qt
+        def ev(kind, pos, buttons=Qt.LeftButton):
+            return QMouseEvent(kind, QtCore.QPointF(pos), QtCore.QPointF(pos),
+                               buttons, buttons, Qt.NoModifier)
+        sel.mousePressEvent(ev(QtCore.QEvent.MouseButtonPress, press_at))
+        sel.mouseMoveEvent(ev(QtCore.QEvent.MouseMove, move_to))
+        sel.mouseReleaseEvent(ev(QtCore.QEvent.MouseButtonRelease, move_to, Qt.NoButton))
+
+    def test_click_selects_hovered_window_whole(self):
+        win = QtCore.QRect(100, 50, 300, 200)
+        sel = self._selector_with_windows([win])
+        got = []
+        sel.selected.connect(lambda rect, img: got.append(rect))
+        self._press_move_release(sel, QtCore.QPoint(150, 100), QtCore.QPoint(152, 101))
+        self.assertEqual(got, [QtCore.QRect(100, 50, 300, 200)])
+
+    def test_drag_beyond_threshold_switches_to_free_region(self):
+        win = QtCore.QRect(100, 50, 300, 200)
+        sel = self._selector_with_windows([win])
+        got = []
+        sel.selected.connect(lambda rect, img: got.append(rect))
+        # Endpoint deliberately >10px from every edge/center guide
+        self._press_move_release(sel, QtCore.QPoint(150, 100), QtCore.QPoint(265, 170))
+        self.assertEqual(len(got), 1)
+        self.assertNotEqual(got[0], QtCore.QRect(100, 50, 300, 200))
+        self.assertEqual(got[0].topLeft(), QtCore.QPoint(150, 100))
+        self.assertEqual(got[0].bottomRight(), QtCore.QPoint(265, 170))
+
+    def test_drag_snaps_moving_edge_to_window_border(self):
+        win = QtCore.QRect(100, 50, 300, 200)                     # right edge x=399
+        sel = self._selector_with_windows([win])
+        got = []
+        sel.selected.connect(lambda rect, img: got.append(rect))
+        # Release 4px short of the right border and 4px past the bottom border
+        self._press_move_release(sel, QtCore.QPoint(120, 60), QtCore.QPoint(395, 246))
+        self.assertEqual(got[0].bottomRight(), QtCore.QPoint(399, 249))
+
+    def test_no_snap_setting_disables_hover(self):
+        sel = self._make()
+        sel.snap = False
+        sel._wins = [QtCore.QRect(0, 0, 400, 300)]
+        cancelled = []
+        sel.cancelled.connect(lambda: cancelled.append(True))
+        self._press_move_release(sel, QtCore.QPoint(10, 10), QtCore.QPoint(11, 11))
+        self.assertEqual(cancelled, [True])                      # tiny click, no window grab
+
+    def test_list_visible_windows_swallows_no_display(self):
+        self.assertIsInstance(kapture.list_visible_windows(), list)  # never raises
+
 
 if __name__ == "__main__":
     unittest.main()

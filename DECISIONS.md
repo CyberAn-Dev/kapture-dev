@@ -26,12 +26,16 @@
 
 ## Editor controls and automatic OCR
 
+- OCR action buttons remain in the viewport. Their named container uses the current editor background, while button colors inherit the shared theme; use scoped compact sizing rather than a local hard-coded translucent stylesheet.
+
 - Place output actions immediately after their label, keeping the row left aligned.
 - Route Ctrl+Z to annotation undo when the editor controls have focus and to QPlainTextEdit undo when the OCR result box has focus.
 - Enable screenshot OCR by default, show its result in the editor, and keep the screenshot image on the clipboard. Manual OCR continues to copy recognized text. A setting disables automatic OCR.
 - Reuse the existing OCR preprocessing and Tesseract options inside a background QThread. Ignore older results after a new capture or editor change, and bound automatic Tesseract execution to 20 seconds.
 
 ## Pin clipboard images (Ctrl+1 / Ctrl+2)
+
+- Shortcut labels must map `--pin1` and `--pin2` to their existing localized pin descriptions; neither action is region capture. The clipboard image history is in-process, so the previous image must have been observed in the current application session.
 
 - Pin-to-clipboard is PixPin-style: Ctrl+1 pins the most recent image on the system clipboard, Ctrl+2 pins the one before it, and Esc closes a pinned window. Reuse the existing global-shortcut pipeline (GNOME custom-keybinding / KDE KHotKey running `run.sh --pin1|--pin2`); the new actions join `SHORTCUT_ACTIONS` so they appear in the shortcuts tab automatically.
 - The data source is a Kapture-internal image history built from `QClipboard.dataChanged` (newest first, capped at 10). No clipboard manager is installed and neither GNOME nor X11 exposes a readable history API, so the process must track images itself; Kapture's own `self.history` is not the source.
@@ -55,8 +59,9 @@
 - Scrolling-capture feedback is a shared `ScrollHud` (live thumbnail + height + stop, placed outside the region) plus a red region frame. Both modes use it; `ManualBar` is deleted. Auto mode streams previews through a new `CaptureWorker.frame` signal, downscaled to 1200 px before emitting (queued-signal cost stays bounded for 40 000 px captures); the HUD's stop calls `worker.abort()`, reusing the worker's existing partial-result emit path instead of a new one.
 - The region frame is four thin always-on-top strips hugging the region's outer edge, NOT a full-desktop translucent overlay: `WA_TransparentForMouseEvents` is Qt-application-local and does not make an X11 top-level window click-through, so a full-desktop overlay swallowed pynput's wheel events and the auto scrolling capture could no longer scroll (self-inflicted regression, fixed by construction — the strips never cover the region and are mouse-transparent).
 - Automatic and manual scrolling share `CaptureWorker` and global-canvas matching. Manual grabbing, matching, stitching, and preview downsampling run off the GUI thread. Both directions extend only outside the existing canvas; automatic capture defaults downward and exposes upward capture in its toolbar dropdown.
-- Match textured strips only, validate the full overlap, and reject ambiguous repeated-row matches. An unchanged frame stays at its previous location; seam refinement preserves the proposed offset on ties and touches only overlap rows. Convert only the bounded canvas search region. Manual unlocatable frames prompt the user to return to captured content; automatic capture stops with the continuous partial image instead of advancing its reference across missing content. Featureless/repeated pages cannot always be positioned uniquely from pixels alone.
-- Before every framebuffer grab, the GUI hides both border windows and HUD, then acknowledges after 100 ms for compositor repaint. The worker waits at most 3 s; Esc wakes it on cancellation. Controls reappear between grabs. This avoids compositor shadows entering the selected region, including systems that ignore no-shadow hints. The HUD is hidden when no screen has room outside the region; a temporary global Esc listener remains available and is removed on completion. Starting another region capture while one is active is refused.
+- Match textured strips only, validate the full overlap, and reject ambiguous repeated-row matches. An unchanged frame stays at its previous location; seam refinement preserves the proposed offset on ties and touches only overlap rows. Convert only the bounded canvas search region. Manual unlocatable frames are skipped silently until three stable unmatched frames trigger one manual-specific prompt; successful matching clears the warning state. Automatic capture stops with the continuous partial image instead of advancing its reference across missing content. Featureless/repeated pages cannot always be positioned uniquely from pixels alone.
+- Alignment and seam refinement exclude only the outer `min(16, width // 50)` columns on each side; exported pixels retain the full width. This prevents narrow border changes from invalidating every overlap row. Fixed top/bottom rows are inferred before the first accepted movement and used only if the body independently matches at a nonzero offset; each margin is bounded to one third of the viewport. Keep head and foot once outside the stitched body, taking their pixels from the actual outermost frames so repeated text/blank edge rows do not freeze stale content. Apply maximum-height cropping to the complete image to avoid attaching a footer beyond the retained range.
+- Capture controls stay outside the region and remain visible during both automatic and manual grabs. `_BorderStrip` and `ScrollHud` use `WA_TranslucentBackground` plus `NoDropShadowWindowHint`: the ARGB surface removes the compositor-generated shadows observed in the real X11 pixel comparison, without per-frame map/unmap flicker. The HUD is hidden when no screen has room outside the region; a temporary global Esc listener remains available and is removed on completion. Starting another region capture while one is active is refused.
 - HUD aspect ratio comes entirely from the preview array, while the displayed pixel height is passed separately from the original canvas. Automatic and manual modes use the same payload.
 - Clipboard history compares complete QImage content directly, replacing partial SHA1 sampling; central-only changes must create a new history entry. No new hash or fingerprint is introduced.
 - Explicit image saving exports the flattened annotated QImage only. A failed write reports failure; it must never fall back to the original unannotated image or claim success.
@@ -75,3 +80,21 @@
 ## Pending follow-ups from user feedback
 
 - (none currently open)
+
+## Stable capture chrome (2026-10-08 follow-up)
+
+- Both modes set `hide_ui_for_grab = False`. The earlier manual-only exemption stopped blinking but retained real shadow contamination; automatic hide/show still blinked. Fix the windows themselves with translucent backgrounds and no-shadow hints, preserving the shared worker and existing outside-region placement. `WindowDoesNotAcceptFocus` on the HUD keeps controls from taking focus from the capture target. The translucent custom HUD explicitly draws `PE_Widget` so its styled dark background remains opaque and readable.
+- Keep an opt-in real-X11 smoke check alongside the offscreen suite: only compositor/framebuffer evidence can establish absence of window shadows. It checks exact pixels, wheel input in both directions, manual revisits, control visibility, and the stop button without changing clipboard or settings.
+
+## Pin ergonomics and selection snapping (PixPin alignment, 2026-10-08)
+
+- Pin click-through uses **XShape empty ShapeInput** (`_x11_set_input_passthrough`), not `WA_TransparentForMouseEvents` — Qt's attribute is app-local and does not cross to X11 (same lesson as the ScrollRegionOverlay docstring). A passthrough pin receives zero input, so the tray carries the only escape hatch ("关闭全部钉图鼠标穿透"); helper failures are silent (offscreen/no-SHAPE degrade to no-op, state tracks intent).
+- OCR-from-pin reuses the **headless `_grab_ocr` path** through a constructor callback (`PinnedImage(qimage, on_ocr=...)`, FloatingThumbnail pattern) rather than an app-wide event filter — all three construction sites are inside MainWindow, so wiring is complete and the widget stays MainWindow-agnostic.
+- Hover-snap enumerates Xlib top-levels **once per selector show** and caches (screen is frozen anyway); override-redirect + unmapped + <30px windows filtered. Snap rects include KWin frame/shadow margins — deliberately consistent with existing window capture, `_NET_FRAME_EXTENTS` refinement deferred.
+- Press never commits to window mode: only release with <4px movement selects the hovered window; past the threshold the same gesture becomes a free region drag (PixPin semantics, regression-tested).
+- One settings key `snap_windows` (default on) covers hover-select + edge-snap as one user-perceived behavior; edge guides are window edges/centers + screen edges + own origin, threshold 10 logical px.
+- Loupe zoom steps are integer multiples at any dpr (`_loupe_geometry`) so the pixel grid aligns to real pixel boundaries; grid drawn only when cells ≥4px.
+
+## Accepted local version and delivery (2026-10-08)
+
+- Keep the current repository-backed application as the local working version and publish its application, test, install and documentation changes together to `origin/main`. Exclude `.serena/` tooling state and generated/runtime artifacts; no `.deb` release is implied by the source push.

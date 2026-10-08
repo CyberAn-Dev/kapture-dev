@@ -41,6 +41,20 @@ class ThemePreviewTest(unittest.TestCase):
         self.window.close()
         self.desktop_patch.stop()
 
+    def test_ocr_actions_background_matches_editor_across_themes(self):
+        self.window.text.setPlainText('OCR result')
+        for theme in ('dark', 'light', 'starship'):
+            self.window._apply_style(theme=theme)
+            self.app.processEvents()
+            image = self.window.text.viewport().grab().toImage()
+            pos = self.window._ocr_btns.pos()
+            self.assertEqual(image.pixelColor(pos.x() + 2, pos.y() + 10).name(),
+                             kapture.THEMES[theme]['editor'], theme)
+
+    def test_pin_shortcut_labels_describe_their_actual_actions(self):
+        self.assertEqual(self.window._action_label('--pin1'), kapture.t('cap_pin1'))
+        self.assertEqual(self.window._action_label('--pin2'), kapture.t('cap_pin2'))
+
     def test_selection_previews_both_windows_cancel_restores_and_ok_saves(self):
         self.assertEqual(self.window.grab().toImage().pixelColor(10, 10).name(), "#1b1b20")
 

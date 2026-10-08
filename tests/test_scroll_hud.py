@@ -87,6 +87,15 @@ class ScrollHudTest(unittest.TestCase):
         self.assertIn("12345", hud.lbl.text())
         hud.close()
 
+    def test_translucent_hud_keeps_readable_panel_background(self):
+        hud = self._hud()
+        self.addCleanup(hud.close)
+        hud.show_on_top()
+        self.app.processEvents()
+        color = hud.grab().toImage().pixelColor(hud.width() - 5, hud.height() // 2)
+        self.assertEqual(color.alpha(), 255)
+        self.assertLess(color.lightness(), 80)
+
     def test_hud_survives_garbage(self):
         hud = self._hud()
         hud.set_image(None)                  # must not raise

@@ -109,6 +109,78 @@ class ScrollRegressionTest(unittest.TestCase):
         mouse.assert_not_called()
         np.testing.assert_array_equal(results[0], page[:800])
 
+    def _chrome_mocks(self):
+        # Mock overlays whose _wins lists must stay iterable for hide/show/close.
+        overlay = mock.patch.object(kapture, 'ScrollRegionOverlay').start()
+        hud = mock.patch.object(kapture, 'ScrollHud').start()
+        overlay.return_value._wins = []
+        self.addCleanup(mock.patch.stopall)
+        return overlay, hud
+
+    def _run_worker_loop(self, window):
+        # Pump the event loop so the hide-timer and queued signals fire while
+        # the worker thread runs (a plain wait() would deadlock the 100 ms timer).
+        from PyQt5.QtTest import QTest
+        for _ in range(1500):
+            if not window.worker.isRunning():
+                break
+            self.app.processEvents()
+            QTest.qWait(10)
+        window.worker.wait(5000)
+        self.app.processEvents()
+
+    def test_manual_mode_never_hides_capture_chrome(self):
+        # The old manual mode grabbed continuously without touching the red
+        # frame/HUD; hiding per frame (~2Hz) makes them blink and pulls the
+        # stop button out from under the cursor. Neither mode should hide.
+        page = np.random.RandomState(3).randint(0, 256, (1000, 100, 3), dtype=np.uint8)
+        window = kapture.MainWindow()
+        self.addCleanup(window.close)
+        self._chrome_mocks()
+        window._present_capture = mock.Mock()      # clipboard/editor irrelevant here
+        flags = []
+        real_prepare = window._prepare_scroll_grab
+        window._prepare_scroll_grab = lambda: (flags.append('hide'), real_prepare())[1]
+        frames = iter([page[200:600], page[400:800]])
+        def grab(*args):
+            try:
+                return next(frames)
+            except StopIteration:
+                window.worker.abort()
+                return None
+        with mock.patch.object(kapture, 'grab_region', side_effect=grab), \
+                mock.patch.object(kapture.time, 'sleep'), \
+                mock.patch.object(kapture, 'KeyListener'):
+            window._start_scroll_worker((0, 0, 100, 400), QtCore.QRect(0, 0, 100, 400),
+                                        1.0, manual=True)
+            self._run_worker_loop(window)
+        self.assertFalse(flags, 'manual capture hid the frame/HUD: ' + str(flags))
+
+    def test_auto_mode_never_hides_capture_chrome(self):
+        page = np.random.RandomState(8).randint(0, 256, (1000, 100, 3), dtype=np.uint8)
+        window = kapture.MainWindow()
+        self.addCleanup(window.close)
+        self._chrome_mocks()
+        window._present_capture = mock.Mock()
+        flags = []
+        real_prepare = window._prepare_scroll_grab
+        window._prepare_scroll_grab = lambda: (flags.append('hide'), real_prepare())[1]
+        frames = iter([page[400:800], page[200:600]])
+        def grab(*args):
+            try:
+                return next(frames)
+            except StopIteration:
+                window.worker.abort()
+                return None
+        with mock.patch.object(kapture, 'grab_region', side_effect=grab), \
+                mock.patch.object(kapture, 'MouseController'), \
+                mock.patch.object(kapture.time, 'sleep'), \
+                mock.patch.object(kapture, 'KeyListener'):
+            window._start_scroll_worker((0, 0, 100, 400), QtCore.QRect(0, 0, 100, 400),
+                                        1.0, manual=False)
+            self._run_worker_loop(window)
+        self.assertFalse(flags, 'auto capture hid the frame/HUD: ' + str(flags))
+
 
 if __name__ == '__main__':
     unittest.main()

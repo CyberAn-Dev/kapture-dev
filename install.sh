@@ -11,7 +11,7 @@ echo "==> 安装系统依赖(需要输入密码)..."
 sudo apt update
 sudo apt install -y tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
                     python3-venv python3-pyqt5 python3-opencv python3-numpy \
-                    python3-pil python3-pynput python3-packaging \
+                    python3-pil python3-pynput python3-xlib python3-packaging \
                     fonts-noto-cjk ffmpeg
 
 # 2) 复用 apt 安装的 Python 库，仅下载 apt 未提供的两个包

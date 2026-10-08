@@ -51,6 +51,7 @@ If you have been looking for a Linux alternative to Snipaste, ShareX, Flameshot,
   seamless **long screenshot** (perfect for web pages, chat logs, code, documents).
 - **Manual scrolling capture** — you scroll, Kapture stitches.
 - **Repeat last area** — re-shoot the exact same region instantly.
+- **Window snapping** — while selecting, hovering highlights a window and a single click grabs it whole; dragging edges snap to nearby window borders (toggle in **Settings → General**).
 - **Screen color picker** — eyedropper any pixel on screen.
 
 ### 🖍️ Annotate
@@ -65,7 +66,7 @@ line width, plus button or **Ctrl+Z** undo and clear.
 
 ### 🎬 Output & share
 - **Auto-copy to clipboard** after capture, with a floating thumbnail in the corner.
-- **📌 Pin to screen** — keep a screenshot floating on top (drag to move, scroll to zoom, double-click to close).
+- **📌 Pin to screen** — keep a screenshot floating on top (drag to move, wheel to zoom, **Ctrl+wheel for transparency**, **`O` or right-click → OCR text**, right-click for click-through / reset opacity, double-click to close).
 - **🎨 Beautify export** — gradient background, rounded corners, drop shadow.
 - **⏺ Screen recording** to **MP4 / GIF** with adjustable frame rate.
 - **🕘 History** of recent captures.

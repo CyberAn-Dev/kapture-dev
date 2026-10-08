@@ -189,6 +189,13 @@ TR = {
                        "en": "Open editor after capture (otherwise thumbnail only)"},
     "set_start_hidden": {"zh": "启动时在后台运行（通过托盘或快捷键唤起）",
                          "en": "Start in background (open from tray or shortcut)"},
+    "set_snap_windows": {"zh": "截图时吸附窗口（悬停高亮并单击选中整个窗口、拖拽边缘对齐窗口边界）",
+                         "en": "Snap to windows while selecting (hover highlights a window, click selects it; edges align to window borders)"},
+    "p_ocr": {"zh": "识别文字 (O)", "en": "OCR text (O)"},
+    "p_clickthrough": {"zh": "鼠标穿透", "en": "Click-through"},
+    "p_reset_opacity": {"zh": "恢复不透明", "en": "Reset opacity"},
+    "tray_undo_clickthrough": {"zh": "关闭全部钉图鼠标穿透",
+                               "en": "Disable click-through on all pins"},
     "set_sc_hint": {"zh": "点击输入框后按组合键；清空可停用。快捷键由当前桌面管理。",
                     "en": "Click a field and press a key combo; clear to disable. Managed by your desktop."},
     "set_sc_unavailable": {"zh": "当前桌面不支持在 Kapture 中直接注册全局快捷键；可在系统设置中绑定下列命令。",
@@ -248,6 +255,8 @@ TR = {
                    "en": "Scroll up/down; Stop or Esc when done"},
     "scroll_unmatched": {"zh": "无法对齐：请滚回已捕获区域；自动模式已停止并保留连续部分",
                          "en": "Cannot align: return to captured area; auto mode stopped with continuous result"},
+    "scroll_manual_unmatched": {"zh": "暂时无法对齐：请回到已捕获区域；手动模式仍在继续",
+                                 "en": "Temporarily cannot align: return to captured area; manual mode continues"},
     "scroll_down": {"zh": "自动向下滚动", "en": "Auto scroll down"},
     "scroll_up": {"zh": "自动向上滚动", "en": "Auto scroll up"},
     "t_ocr_all": {"zh": "全部识别", "en": "Recognize all"},
@@ -764,6 +773,76 @@ def get_window_geom_at_pointer():
         return None
 
 
+def list_visible_windows():
+    """Top-to-bottom list of physical (x, y, w, h) rects of viewable normal top-level windows.
+
+    Enumerates root's direct children once (the same frame windows the existing
+    window capture returns, title bar included). Override-redirect windows (menus,
+    tooltips, our own bypass-WM overlays) and unmapped/tiny windows are skipped.
+    """
+    try:
+        from Xlib import display as _disp
+        d = _disp.Display()
+        root = d.screen().root
+        out = []
+        for win in reversed(root.query_tree().children):   # Xlib order is bottom-to-top
+            try:
+                attr = win.get_attributes()
+                if attr.map_state != 2 or attr.override_redirect:   # IsViewable
+                    continue
+                geo = win.get_geometry()
+                tc = win.translate_coords(root, 0, 0)
+                x, y = -tc.x, -tc.y
+                if geo.width < 30 or geo.height < 30:
+                    continue
+                out.append((int(x), int(y), int(geo.width), int(geo.height)))
+            except Exception:                               # dead window mid-enumeration
+                continue
+        d.close()
+        return out
+    except Exception:                       # noqa: BLE001
+        return []
+
+
+def snap_point(px, py, xs, ys, threshold=10):
+    """Snap (px, py) to the nearest guide within threshold on each axis.
+
+    Returns (snapped_x, snapped_y, hit_x, hit_y); hit_* is None when that axis did
+    not snap (used to draw guide lines only where a snap happened). During a free
+    corner drag the moving edges pass exactly through the cursor, so snapping the
+    cursor point is moving-edge snapping.
+    """
+    sx, hx = px, None
+    for gx in xs:
+        if abs(gx - px) <= threshold and (hx is None or abs(gx - px) < abs(hx - px)):
+            hx = gx
+    sy, hy = py, None
+    for gy in ys:
+        if abs(gy - py) <= threshold and (hy is None or abs(gy - py) < abs(hy - py)):
+            hy = gy
+    return (hx if hx is not None else px,
+            hy if hy is not None else py, hx, hy)
+
+
+def _x11_set_input_passthrough(win_id, passthrough):
+    """XShape: an empty ShapeInput makes the window fully click-through;
+    combining ShapeInput from Bounding restores normal input. Returns success."""
+    try:
+        from Xlib import display as _disp
+        from Xlib.ext import shape
+        d = _disp.Display()
+        w = d.create_resource_object('window', int(win_id))
+        if passthrough:
+            w.shape_rectangles(shape.SO.Set, shape.SK.Input, 0, 0, 0, [])
+        else:
+            w.shape_combine(shape.SO.Set, shape.SK.Input, shape.SK.Bounding, 0, 0)
+        d.flush()
+        d.close()
+        return True
+    except Exception:                       # noqa: BLE001  (offscreen / no DISPLAY / no SHAPE)
+        return False
+
+
 def _strip_cjk_spaces(text):
     """Remove spaces erroneously inserted between CJK characters, while keeping spaces between English words."""
     import re
@@ -821,6 +900,29 @@ def find_new_content(prev_bgr, cur_bgr, min_confidence=0.5):
     return new_start, max_val
 
 
+def _scroll_match_columns(width):
+    """Exclude narrow viewport side borders/scrollbars from alignment only."""
+    margin = min(16, width // 50)
+    return slice(margin, width - margin)
+
+
+def fixed_scroll_edges(previous, current):
+    """Propose stationary viewport headers/footers; the caller verifies body motion.
+
+    Equal rows alone are not evidence of scrolling. These margins are used only
+    when the remaining body independently matches at a nonzero offset.
+    """
+    columns = _scroll_match_columns(current.shape[1])
+    delta = np.abs(previous[:, columns].astype(np.int16) -
+                   current[:, columns].astype(np.int16))
+    same = np.max(delta, axis=(1, 2)) <= 2
+    changed = np.flatnonzero(~same)
+    if not len(changed):
+        return 0, 0
+    top, bottom = int(changed[0]), len(same) - 1 - int(changed[-1])
+    limit = len(same) // 3
+    return (top if top <= limit else 0, bottom if bottom <= limit else 0)
+
 def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
     """Locate an overlapping viewport; reject blank and ambiguous matches.
 
@@ -831,11 +933,13 @@ def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
     if h > ch:
         return None, 0.0
     hint = int(y_hint)
-    if 0 <= hint <= ch - h and np.array_equal(canvas_bgr[hint:hint+h], frame_bgr):
+    columns = _scroll_match_columns(frame_bgr.shape[1])
+    if (0 <= hint <= ch - h and
+            np.array_equal(canvas_bgr[hint:hint+h, columns], frame_bgr[:, columns])):
         return hint, 1.0
     y0, y1 = max(0, hint-band), min(ch, hint+band+h)
-    cg = cv2.cvtColor(canvas_bgr[y0:y1], cv2.COLOR_BGR2GRAY)
-    fg = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    cg = cv2.cvtColor(canvas_bgr[y0:y1, columns], cv2.COLOR_BGR2GRAY)
+    fg = cv2.cvtColor(frame_bgr[:, columns], cv2.COLOR_BGR2GRAY)
     strip_h = min(h, max(24, h // 4))
     candidates = set()
     confidence = 0.0
@@ -905,8 +1009,9 @@ def refine_frame_offset(canvas_bgr, frame_bgr, y, win=8, rows=160):
         if hi-lo < min(rows, h)//2:
             continue
         lo = max(lo, hi-rows)
-        a = canvas_bgr[lo:hi].astype(np.int16)
-        b = frame_bgr[lo-yy:hi-yy].astype(np.int16)
+        columns = _scroll_match_columns(frame_bgr.shape[1])
+        a = canvas_bgr[lo:hi, columns].astype(np.int16)
+        b = frame_bgr[lo-yy:hi-yy, columns].astype(np.int16)
         diff = float(np.abs(a-b).mean())
         if diff < best_diff:
             best_y, best_diff = yy, diff
@@ -990,6 +1095,7 @@ class CaptureWorker(QThread):
 
     def run(self):
         canvas = None
+        header = footer = None
         try:
             mouse = None
             if not self.manual:
@@ -1002,7 +1108,12 @@ class CaptureWorker(QThread):
             if canvas is None:
                 return
             self._preview(canvas)
+            first = canvas
+            top = bottom = 0
+            edges_checked = False
             y_hint, stationary, iteration = 0, 0, 0
+            unmatched_frame, unmatched_streak = None, 0
+            manual_unmatched_warned = False
             while not self._abort and (self.manual or iteration < self.max_iters):
                 iteration += 1
                 if mouse is not None:
@@ -1011,32 +1122,76 @@ class CaptureWorker(QThread):
                 cur = self._grab()
                 if cur is None:
                     break
+                raw_cur = cur
+                if not edges_checked:
+                    trim_top, trim_bottom = fixed_scroll_edges(first, cur)
+                    if trim_top or trim_bottom:
+                        end = self.height - trim_bottom
+                        body = first[trim_top:end]
+                        offset, _ = locate_frame(body, cur[trim_top:end])
+                        if offset is not None and offset != 0:
+                            # Commit fixed margins only after independent body
+                            # motion is located. Static chrome cannot match a gap.
+                            top, bottom = trim_top, trim_bottom
+                            header, footer = first[:top], first[end:]
+                            canvas = body
+                            edges_checked = True
+                cur = cur[top:self.height-bottom]
                 y, conf = locate_frame(canvas, cur, y_hint)
                 if y is None:
-                    self.progress.emit(t("scroll_unmatched"))
                     if not self.manual:
+                        self.progress.emit(t("scroll_unmatched"))
                         # Stop at the last continuous image: never advance the
                         # reference across a gap or keep scrolling farther away.
                         break
+                    if unmatched_frame is None:
+                        unmatched_streak = 1
+                    else:
+                        pixel_change = float(np.abs(
+                            cur.astype(np.int16) - unmatched_frame.astype(np.int16)
+                        ).mean())
+                        unmatched_streak = (unmatched_streak + 1
+                                             if pixel_change <= 3.0 else 1)
+                    unmatched_frame = cur
+                    if unmatched_streak >= 3 and not manual_unmatched_warned:
+                        self.progress.emit(t("scroll_manual_unmatched"))
+                        manual_unmatched_warned = True
                     continue
+                unmatched_frame, unmatched_streak = None, 0
+                manual_unmatched_warned = False
+                if y != y_hint:
+                    edges_checked = True
                 y = refine_frame_offset(canvas, cur, y)
                 old_h = canvas.shape[0]
+                if header is not None:
+                    # Repeated blank/text rows may look fixed on the first
+                    # scroll. Keep the actual outermost viewport pixels, not
+                    # a stale copy of those rows from the initial viewport.
+                    if y < 0:
+                        header = raw_cur[:top]
+                    if y + cur.shape[0] > old_h:
+                        footer = raw_cur[self.height-bottom:]
                 canvas, y_hint = stitch_frame(canvas, cur, y)
                 stationary = stationary+1 if canvas.shape[0] == old_h else 0
-                if canvas.shape[0] > self.max_height:
-                    if y < 0:
-                        canvas = canvas[-self.max_height:]
-                    else:
-                        canvas = canvas[:self.max_height]
-                self._preview(canvas)
-                self.progress.emit(f"{canvas.shape[0]} px · Esc " + t("hud_stop"))
-                if canvas.shape[0] >= self.max_height:
+                image = (np.vstack((header, canvas, footer))
+                         if header is not None else canvas)
+                if image.shape[0] >= self.max_height:
+                    # Crop the assembled image, not its body: retaining a
+                    # footer from beyond the limit would introduce a gap.
+                    image = (image[-self.max_height:] if y < 0
+                             else image[:self.max_height])
+                    canvas, header, footer = image, None, None
+                self._preview(image)
+                self.progress.emit(f"{image.shape[0]} px · Esc " + t("hud_stop"))
+                if image.shape[0] >= self.max_height:
                     break
                 if not self.manual and stationary >= 3:
                     break
         except Exception as exc:
             self.progress.emit(f"Error: {exc}")
         finally:
+            if canvas is not None and header is not None:
+                canvas = np.vstack((header, canvas, footer))
             self.finished_img.emit(canvas)
 
 
@@ -1056,6 +1211,7 @@ class RegionSelector(QtWidgets.QWidget):
 
     LOUPE = 120          # loupe side length (logical pixels)
     ZOOM = 8             # zoom factor
+    SNAP_T = 10          # edge-snap threshold (logical pixels)
 
     def __init__(self, mode="region"):
         super().__init__()
@@ -1090,6 +1246,15 @@ class RegionSelector(QtWidgets.QWidget):
 
         self.origin = None
         self.cur = QtCore.QPoint(0, 0)
+        # Window snapping (region mode): hover-highlight + click-select and edge guides
+        self.snap = QtCore.QSettings("ScrollShot", "ScrollShot").value(
+            "snap_windows", True, type=bool)
+        self._wins = None          # cached window rects (widget coords), filled on show
+        self._hover = None         # hovered window rect (widget coords)
+        self._press_pos = None
+        self._dragging = False
+        self._guides = None        # (xs, ys) guide lines built at drag start
+        self._snap_lines = None    # [(vertical, coord)] drawn this frame
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -1099,6 +1264,23 @@ class RegionSelector(QtWidgets.QWidget):
         self.raise_()
         self.setFocus(Qt.OtherFocusReason)
         self.grabKeyboard()
+        if self.mode == "region" and self.snap and self._wins is None:
+            self._wins = [self._phys_to_logical(r) for r in list_visible_windows()]
+
+    def _phys_to_logical(self, phys):
+        """Physical (x, y, w, h) on the X root -> widget logical coords."""
+        x, y, w, h = phys
+        return QRect(int(x / self.dpr) - self.vorigin.x(),
+                     int(y / self.dpr) - self.vorigin.y(),
+                     int(w / self.dpr), int(h / self.dpr))
+
+    @staticmethod
+    def hit_window(wins, pt):
+        """First (top-most) rect in a top-to-bottom list containing pt, else None."""
+        for r in wins:
+            if r.contains(pt):
+                return r
+        return None
 
     def closeEvent(self, e):
         self.releaseKeyboard()   # no-op if we never grabbed it
@@ -1122,6 +1304,19 @@ class RegionSelector(QtWidgets.QWidget):
         p.setPen(QtGui.QColor(255, 255, 255, 220))
         p.drawText(20, 30, hint)
 
+        if (self.mode == "region" and self.origin is None and self._hover
+                and self.snap):
+            # Hover-highlight the window under the cursor: a single click grabs it whole
+            hv = self._hover
+            p.drawPixmap(hv, self.bg_pix, QtCore.QRectF(
+                hv.x() * self.dpr, hv.y() * self.dpr,
+                hv.width() * self.dpr, hv.height() * self.dpr).toRect())
+            p.setPen(QtGui.QPen(QtGui.QColor(0, 170, 255), 2))
+            p.drawRect(hv)
+            p.setPen(QtGui.QColor(255, 255, 255))
+            p.drawText(hv.left(), max(hv.top() - 6, 12),
+                       f"{hv.width()} × {hv.height()}")
+
         if self.mode == "region" and self.origin and self.cur:
             r = QRect(self.origin, self.cur).normalized()
             # Restore the selection to the sharp picture
@@ -1133,41 +1328,64 @@ class RegionSelector(QtWidgets.QWidget):
             p.setPen(QtGui.QColor(255, 255, 255))
             p.drawText(r.left(), max(r.top() - 6, 12),
                        f"{r.width()} × {r.height()}")
+            # Magenta guide lines where edge-snapping kicked in
+            if self._snap_lines:
+                p.setPen(QtGui.QPen(QtGui.QColor(255, 0, 200, 180), 1))
+                for vertical, c in self._snap_lines:
+                    if vertical:
+                        p.drawLine(c, 0, c, self.height())
+                    else:
+                        p.drawLine(0, c, self.width(), c)
 
         self._draw_loupe(p, self.cur)
 
+    def _loupe_geometry(self):
+        """Integer on-screen px per source px (s), source side, drawn side — grid-aligned at any dpr."""
+        s = max(1, round(self.ZOOM / self.dpr))
+        src_px = self.LOUPE // s
+        return s, src_px, src_px * s
+
     def _draw_loupe(self, p, lp):
-        L, Z = self.LOUPE, self.ZOOM
-        src_px = int(L / Z * self.dpr)          # source sampling side length (physical pixels)
+        L = self.LOUPE
+        s, src_px, side = self._loupe_geometry()
         sx = int(lp.x() * self.dpr) - src_px // 2
         sy = int(lp.y() * self.dpr) - src_px // 2
         src = self.bg_img.copy(sx, sy, src_px, src_px)
-        zoom = src.scaled(L, L, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+        zoom = src.scaled(side, side, Qt.IgnoreAspectRatio, Qt.FastTransformation)
 
         # Place the loupe to the lower-right of the cursor; flip it when near an edge
         ox, oy = lp.x() + 20, lp.y() + 20
-        if ox + L > self.width():
-            ox = lp.x() - L - 20
-        if oy + L + 34 > self.height():
-            oy = lp.y() - L - 34
-        box = QRect(ox, oy, L, L)
+        if ox + side > self.width():
+            ox = lp.x() - side - 20
+        if oy + side + 34 > self.height():
+            oy = lp.y() - side - 34
+        box = QRect(ox, oy, side, side)
 
         p.drawImage(box, zoom)
-        # Crosshair
-        p.setPen(QtGui.QPen(QtGui.QColor(0, 170, 255, 200), 1))
+        # Pixel grid: one cell per source pixel when cells are big enough to matter
+        if s >= 4:
+            p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 50), 1))
+            for i in range(src_px + 1):
+                p.drawLine(ox + i * s, oy, ox + i * s, oy + side)
+                p.drawLine(ox, oy + i * s, ox + side, oy + i * s)
+        # Crosshair (subtle; the center-cell stroke below carries the emphasis)
+        p.setPen(QtGui.QPen(QtGui.QColor(0, 170, 255, 120), 1))
         p.drawLine(box.center().x(), box.top(), box.center().x(), box.bottom())
         p.drawLine(box.left(), box.center().y(), box.right(), box.center().y())
+        # Highlight the exact sampled pixel, then the frame
+        p.setPen(QtGui.QPen(QtGui.QColor(0, 170, 255), 2))
+        p.drawRect(ox + (src_px // 2) * s, oy + (src_px // 2) * s, s, s)
         p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255), 1))
         p.drawRect(box)
 
         col = self._pixel(lp)
         hexv = col.name().upper()
-        info = QRect(ox, oy + L, L, 34)
+        info = QRect(ox, oy + side, side, 34)
         p.fillRect(info, QtGui.QColor(0, 0, 0, 200))
-        p.fillRect(QRect(ox + 4, oy + L + 8, 18, 18), col)
+        p.fillRect(QRect(ox + 4, oy + side + 8, 18, 18), col)
         p.setPen(QtGui.QColor(255, 255, 255))
         f = p.font(); f.setPixelSize(11); p.setFont(f)
-        p.drawText(QRect(ox + 26, oy + L, L - 28, 34),
+        p.drawText(QRect(ox + 26, oy + side, side - 28, 34),
                    Qt.AlignVCenter,
                    f"{hexv}\n({int(lp.x()*self.dpr)},{int(lp.y()*self.dpr)})")
 
@@ -1179,16 +1397,55 @@ class RegionSelector(QtWidgets.QWidget):
             return
         self.origin = e.pos()
         self.cur = e.pos()
+        self._press_pos = e.pos()
+        self._dragging = False
+        self._snap_lines = None
+        if self.snap:
+            # Recompute the hover target at the press point too (covers synthetic
+            # events and presses without a preceding move on this widget)
+            self._hover = self.hit_window(self._wins or [], e.pos())
+        if self.snap and self._wins is not None:
+            xs = [v for r in self._wins for v in (r.left(), r.right(), r.center().x())]
+            ys = [v for r in self._wins for v in (r.top(), r.bottom(), r.center().y())]
+            self._guides = (xs + [0, self.width(), self.origin.x()],
+                            ys + [0, self.height(), self.origin.y()])
         self.update()
 
     def mouseMoveEvent(self, e):
+        if self.mode == "region" and self.snap:
+            if self.origin is None:
+                self._hover = self.hit_window(self._wins or [], e.pos())
+            elif not self._dragging:
+                # Press never commits: past the threshold, it's a free region drag
+                if (e.pos() - self._press_pos).manhattanLength() > 4:
+                    self._dragging = True
+                    self._hover = None
+            if self._dragging and self._guides is not None:
+                px, py, gx, gy = snap_point(e.pos().x(), e.pos().y(),
+                                            self._guides[0], self._guides[1],
+                                            self.SNAP_T)
+                self.cur = QtCore.QPoint(px, py)
+                self._snap_lines = [l for l in ((True, gx), (False, gy))
+                                    if l[1] is not None]
+                self.update()
+                return
         self.cur = e.pos()
         self.update()
 
     def mouseReleaseEvent(self, e):
         if self.mode != "region" or self.origin is None:
             return
-        r = QRect(self.origin, e.pos()).normalized()
+        if not self._dragging and self._hover is not None:
+            # Click without dragging: grab the hovered window whole (PixPin/Snipaste style)
+            hv = self._hover
+            gr = QRect(self.mapToGlobal(hv.topLeft()), hv.size()).intersected(self.geometry())
+            self.close()
+            if gr.width() > 8 and gr.height() > 8:
+                self.selected.emit(gr, self._crop_frozen(hv))
+            else:
+                self.cancelled.emit()
+            return
+        r = QRect(self.origin, self.cur).normalized()
         gr = QRect(self.mapToGlobal(r.topLeft()), r.size())
         self.close()
         if gr.width() > 8 and gr.height() > 8:
@@ -1264,7 +1521,10 @@ class _BorderStrip(QtWidgets.QWidget):
         super().__init__()
         self._color = QtGui.QColor(color)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
-                            Qt.X11BypassWindowManagerHint | Qt.WindowDoesNotAcceptFocus)
+                            Qt.X11BypassWindowManagerHint | Qt.WindowDoesNotAcceptFocus |
+                            Qt.NoDropShadowWindowHint)
+        # ARGB windows avoid compositor-generated shadows outside the strips.
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.setGeometry(rect)
         self.show()
@@ -1287,7 +1547,9 @@ class ScrollHud(QtWidgets.QWidget):
         self._mode = mode
         self.setObjectName("ScrollHud")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
-                            Qt.X11BypassWindowManagerHint)
+                            Qt.X11BypassWindowManagerHint | Qt.NoDropShadowWindowHint |
+                            Qt.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(10)
@@ -1317,6 +1579,14 @@ class ScrollHud(QtWidgets.QWidget):
         self._region = QRect(region)
         self.adjustSize()
         self._place()
+
+    def paintEvent(self, event):
+        # A translucent custom QWidget needs explicit stylesheet painting.
+        # Keep the panel opaque while the rounded corners remain transparent.
+        option = QtWidgets.QStyleOption()
+        option.initFrom(self)
+        painter = QtGui.QPainter(self)
+        self.style().drawPrimitive(QtWidgets.QStyle.PE_Widget, option, painter, self)
 
     def _place(self):
         screens = QtWidgets.QApplication.screens()
@@ -1847,15 +2117,20 @@ class FloatingThumbnail(QtWidgets.QWidget):
 # Pin image to screen (sticky image)
 # --------------------------------------------------------------------------- #
 class PinnedImage(QtWidgets.QWidget):
-    """Pin a screenshot as an always-on-top floating window: drag to move, wheel to zoom, double-click/right-click to close."""
+    """Pin a screenshot as an always-on-top floating window: drag to move, wheel to zoom
+    (Ctrl+wheel adjusts opacity), double-click to close, right-click for actions
+    (copy / OCR / click-through / reset opacity)."""
     _pins = []                                  # hold references to prevent GC
 
-    def __init__(self, qimage):
+    def __init__(self, qimage, on_ocr=None):
         super().__init__()
         PinnedImage._pins.append(self)
         self._orig = QtGui.QPixmap.fromImage(qimage)
         self._scale = 1.0
         self._drag_off = None
+        self._on_ocr = on_ocr                   # callback(BGR numpy), MainWindow._pin_ocr
+        self._opacity = 1.0
+        self._click_through = False
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setCursor(Qt.OpenHandCursor)
@@ -1883,8 +2158,32 @@ class PinnedImage(QtWidgets.QWidget):
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.close()
+        elif e.key() == Qt.Key_O and self._on_ocr is not None:
+            self._do_ocr()
         else:
             super().keyPressEvent(e)
+
+    def _do_ocr(self):
+        if self._on_ocr is not None:
+            self._on_ocr(qimage_to_bgr(self._orig.toImage()))
+
+    def _nudge_opacity(self, up):
+        self._opacity = max(0.3, min(1.0, round(self._opacity + (0.05 if up else -0.05), 2)))
+        self.setWindowOpacity(self._opacity)
+
+    def _reset_opacity(self):
+        self._opacity = 1.0
+        self.setWindowOpacity(1.0)
+
+    def _toggle_click_through(self, on=None):
+        """Mouse pass-through via XShape (empty ShapeInput). State tracks intent;
+        a missing SHAPE extension/offscreen session fails silently. The tray offers
+        an escape hatch because while on, this window receives no input at all."""
+        self._click_through = (not self._click_through) if on is None else bool(on)
+        try:
+            _x11_set_input_passthrough(self.winId(), self._click_through)
+        except Exception:                       # noqa: BLE001
+            pass
 
     def _apply(self):
         pix = self._orig.scaled(
@@ -1896,6 +2195,9 @@ class PinnedImage(QtWidgets.QWidget):
         self.resize(pix.size())
 
     def wheelEvent(self, e):
+        if e.modifiers() & Qt.ControlModifier:
+            self._nudge_opacity(e.angleDelta().y() > 0)
+            return
         self._scale *= 1.1 if e.angleDelta().y() > 0 else 0.9
         self._scale = max(0.1, min(5.0, self._scale))
         self._apply()
@@ -1916,12 +2218,19 @@ class PinnedImage(QtWidgets.QWidget):
     def mouseDoubleClickEvent(self, e):
         self.close()
 
-    def contextMenuEvent(self, e):
+    def _build_menu(self):
         m = QtWidgets.QMenu(self)
-        m.addAction("Copy image", lambda: QtWidgets.QApplication.clipboard()
+        m.addAction(t("card_copy"), lambda: QtWidgets.QApplication.clipboard()
                     .setImage(self._orig.toImage()))
-        m.addAction("Close", self.close)
-        m.exec_(e.globalPos())
+        if self._on_ocr is not None:
+            m.addAction(t("p_ocr"), self._do_ocr)
+        m.addAction(t("p_clickthrough"), lambda: self._toggle_click_through(True))
+        m.addAction(t("p_reset_opacity"), self._reset_opacity)
+        m.addAction(t("card_close"), self.close)
+        return m
+
+    def contextMenuEvent(self, e):
+        self._build_menu().exec_(e.globalPos())
 
     def closeEvent(self, e):
         if self in PinnedImage._pins:
@@ -2320,21 +2629,17 @@ class MainWindow(QtWidgets.QWidget):
         # once the box holds recognized text (children of the viewport, repositioned
         # on resize via the event filter below).
         self._ocr_btns = QtWidgets.QWidget(self.text.viewport())
+        self._ocr_btns.setObjectName("ocrActions")
         br = QtWidgets.QHBoxLayout(self._ocr_btns)
         br.setContentsMargins(6, 4, 6, 4); br.setSpacing(6)
         self.btn_ocr_all = QtWidgets.QPushButton()
         self.btn_copy_all = QtWidgets.QPushButton()
         for b in (self.btn_ocr_all, self.btn_copy_all):
-            b.setFixedHeight(24)
+            b.setFixedHeight(28)
             b.setCursor(Qt.PointingHandCursor)
         br.addWidget(self.btn_ocr_all)
         br.addWidget(self.btn_copy_all)
         br.addStretch(1)
-        self._ocr_btns.setStyleSheet(
-            "background:rgba(42,42,49,200);border-radius:6px;"
-            "QPushButton{background:#3a3a44;color:#e8e8ec;border:1px solid #4a4a55;"
-            "border-radius:4px;padding:2px 10px;}"
-            "QPushButton:hover{background:#4a4a56;}")
         self.text.viewport().installEventFilter(self)
 
         self.status = QtWidgets.QLabel()
@@ -2510,6 +2815,10 @@ class MainWindow(QtWidgets.QWidget):
             background:{editor}; border:1px solid {edge}; border-radius:10px;
             padding:8px; color:{fg}; selection-background-color:{a};
         }}
+        QWidget#ocrActions {{ background:{editor}; border:none; }}
+        QWidget#ocrActions QPushButton {{
+            border-radius:6px; padding:2px 10px; min-height:0;
+        }}
         QScrollArea {{ border:1px solid {edge}; border-radius:12px; background:{editor}; }}
 
         /* tool card + separators */
@@ -2670,6 +2979,18 @@ class MainWindow(QtWidgets.QWidget):
         n = len(text)
         self._flash_note(f"Copied {n} chars" if _LANG == "en" else f"已复制 {n} 字符")
 
+    def _pin_ocr(self, bgr):
+        """Re-OCR a pinned image: same headless path as text-grab (clipboard + toast)."""
+        self._flash_note(t("st_ocr_running"))
+        self._grab_ocr(bgr)
+
+    def _disable_pin_passthrough(self):
+        """Tray escape hatch: a click-through pin receives no input, so the tray is
+        the only way back when more than one pin is involved."""
+        for p in list(PinnedImage._pins):
+            if p._click_through:
+                p._toggle_click_through(False)
+
     def _flash_note(self, msg):
         """Standalone on-top toast for actions that never open the editor (the editor's
         own _toast lives inside the OCR text box and would be invisible here)."""
@@ -2784,7 +3105,9 @@ class MainWindow(QtWidgets.QWidget):
         self.worker = CaptureWorker(phys, scroll_clicks=self.speed.value(),
                                     manual=manual, direction=self._scroll_direction)
         self.worker.dpr = dpr
-        self.worker.hide_ui_for_grab = True
+        # Both modes keep their shadow-free, outside-region controls visible.
+        # Mapping/unmapping per frame causes blinking and interrupts stop clicks.
+        self.worker.hide_ui_for_grab = False
         self.worker.preparing_grab.connect(self._prepare_scroll_grab)
         self.worker.grabbed.connect(self._show_scroll_controls)
         self.worker.progress.connect(self._scroll_progress)
@@ -2867,7 +3190,8 @@ class MainWindow(QtWidgets.QWidget):
             self._restore()
         else:
             self._present_capture(img, f"Long capture: {img.shape[1]}×{img.shape[0]} px")
-            if message == t("scroll_unmatched") or message.startswith("Error:"):
+            if message in (t("scroll_unmatched"), t("scroll_manual_unmatched")) \
+                    or message.startswith("Error:"):
                 self.status.setText(message)
 
     def _manual_start(self, phys, gr):
@@ -2920,7 +3244,7 @@ class MainWindow(QtWidgets.QWidget):
         if index >= len(self._clip_images):
             self.status.setText(t("st_no_clip_img"))
             return
-        PinnedImage(self._clip_images[index])
+        PinnedImage(self._clip_images[index], on_ocr=self._pin_ocr)
         self.status.setText(t("st_pinned_clip"))
 
     def _ensure_default_shortcuts(self):
@@ -2983,7 +3307,7 @@ class MainWindow(QtWidgets.QWidget):
             on_copy=lambda: QtWidgets.QApplication.clipboard().setImage(
                 bgr_to_qimage(img)),
             on_save=lambda: self._quick_save(img),
-            on_pin=lambda: PinnedImage(bgr_to_qimage(img)))
+            on_pin=lambda: PinnedImage(bgr_to_qimage(img), on_ocr=self._pin_ocr))
         self._thumb.show()
         self._thumb.raise_()
 
@@ -3223,7 +3547,7 @@ class MainWindow(QtWidgets.QWidget):
         flat = self.canvas.render_flattened()
         if flat is None:
             return
-        PinnedImage(flat)
+        PinnedImage(flat, on_ocr=self._pin_ocr)
         self.status.setText(t("st_pinned"))
 
     # --- save --- #
@@ -3265,6 +3589,7 @@ class MainWindow(QtWidgets.QWidget):
         menu.addSeparator()
         menu.addAction(t("tray_show"), lambda: self.handle_command("show"))
         menu.addAction(t("t_settings"), self.show_settings)
+        menu.addAction(t("tray_undo_clickthrough"), self._disable_pin_passthrough)
         menu.addSeparator()
         menu.addAction(t("tray_quit"), self.quit_app)
         self._tray_menu = menu          # keep a reference to prevent GC
@@ -3309,7 +3634,9 @@ class MainWindow(QtWidgets.QWidget):
         cb_edit = QtWidgets.QCheckBox(t("set_openeditor")); cb_edit.setChecked(s.value("open_editor", False, type=bool))
         cb_background = QtWidgets.QCheckBox(t("set_start_hidden"))
         cb_background.setChecked(s.value("start_hidden", False, type=bool))
-        for cb in (cb_copy, cb_save, cb_edit, cb_background):
+        cb_snap = QtWidgets.QCheckBox(t("set_snap_windows"))
+        cb_snap.setChecked(s.value("snap_windows", True, type=bool))
+        for cb in (cb_copy, cb_save, cb_edit, cb_background, cb_snap):
             gf.addRow(cb)
         tabs.addTab(g, t("tab_general"))
 
@@ -3466,6 +3793,7 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("auto_save", cb_save.isChecked())
         s.setValue("open_editor", cb_edit.isChecked())
         s.setValue("start_hidden", cb_background.isChecked())
+        s.setValue("snap_windows", cb_snap.isChecked())
         s.setValue("ocr_lang", lang.currentText())
         s.setValue("ocr_psm", psm.currentData())
         s.setValue("ocr_enhance", enh.isChecked())
@@ -3488,7 +3816,8 @@ class MainWindow(QtWidgets.QWidget):
                   "--scroll": "cap_scroll", "--manual": "cap_manual",
                   "--color": "cap_color", "--record": "cap_record",
                   "--repeat": "cap_repeat", "--show": "tray_show",
-                  "--settings": "t_settings"}.get(flag, "cap_region"))
+                  "--settings": "t_settings", "--pin1": "cap_pin1",
+                  "--pin2": "cap_pin2"}.get(flag, "cap_region"))
 
     def show_history(self):
         if not self.history:
