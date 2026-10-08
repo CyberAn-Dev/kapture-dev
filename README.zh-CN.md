@@ -1,200 +1,86 @@
-<div align="center">
+# Kapture Dev
 
-<img src="kapture.png" alt="Kapture logo" width="120" />
+**面向 Linux X11 的截图、滚动长截图、OCR、标注与钉图工具。**
 
-# Kapture
+本项目基于 [ycwei5/kapture](https://github.com/ycwei5/kapture)，新增双向滚动截图、OCR 取词、剪贴板图片钉图、窗口吸附、GNOME 快捷键恢复和更多主题。
 
-**Linux（X11）下一体化的 截图 · OCR · 录屏 工具。**
-
-区域 / 窗口 / **滚动长截图**、图片标注、内置 **OCR 中英文识别**、录屏、钉图到屏幕、美化导出 ——
-全部集成在一个轻量的 PyQt5 应用里。
-
-[English](README.md) · [简体中文](README.zh-CN.md)
-
-![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11-2b2b2b)
-![Desktop](https://img.shields.io/badge/desktop-Kubuntu%20%C2%B7%20Ubuntu%20%C2%B7%20KDE-1793d1)
-![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![PyQt5](https://img.shields.io/badge/GUI-PyQt5-41cd52)
-![License: MIT](https://img.shields.io/badge/license-MIT-green)
-[![Latest release](https://img.shields.io/github/v/release/ycwei5/kapture?label=download&color=6c5ce7)](https://github.com/ycwei5/kapture/releases/latest)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ycwei5/kapture/pulls)
-
-</div>
-
----
+[English](README.md)
 
 <div align="center">
 
-<img src="docs/images/editor.png" alt="Kapture 编辑器 —— 滚动长截图、标注与 OCR" width="820" />
+<img src="docs/images/editor.png" alt="Kapture Dev 编辑器" width="900" />
 
-<sub>编辑器：一张滚动长截图，配上箭头、方框、高亮、序号、打码，再一键 OCR。</sub>
+<sub>当前编辑器：演示内容、图片标注与 OCR 结果。</sub>
 
 </div>
 
-## Kapture 是什么？
+## 功能
 
-**Kapture** 是一款免费开源的 **Linux 截图工具**，把截图、**滚动长截图**、**OCR 文字识别**、
-图片标注和**录屏**整合进同一个键盘驱动的应用里。它用 Python + PyQt5 编写，面向 **X11** 桌面，
-如 **Kubuntu、Ubuntu、KDE Plasma**。
-
-如果你在找 Linux 上类似 Snipaste、ShareX、Flameshot 的工具，或者一款
-**带 OCR 的 Linux 滚动截图 / 长截图工具**，Kapture 正是为此而生。
-
-## ✨ 功能
-
-### 📸 截图
-- **区域截图** —— 拖拽框选屏幕任意区域。
-- **窗口截图** —— 点选某个窗口直接截取。
-- **自动滚动长截图** —— Kapture 自动滚动目标并把每一帧拼接成一张无缝**长截图**
-  （网页、聊天记录、代码、文档都很合适）。
-- **手动滚动长截图** —— 你来滚动，Kapture 负责拼接。
-- **重复上次区域** —— 一键再截一次相同区域。
-- **窗口吸附** —— 选区时悬停高亮窗口、单击整体选中；拖拽边缘自动吸附窗口边界（可在**设置 → 常规**开关）。
-- **屏幕取色器** —— 吸取屏幕上任意像素的颜色。
-
-### 🖍️ 标注
-矩形 · 椭圆 · 箭头 · 直线 · 画笔 · 文字 · **序号** · 高亮 ·
-**打码 / 马赛克**（遮挡敏感信息）· **放大镜** · 裁剪 —— 颜色与线宽可调，支持按钮或 **Ctrl+Z** 撤销、清除。
-
-### 🔤 OCR 文字识别
-- 基于 **Tesseract**，识别**简体 / 繁体中文与英文**。
-- 提供版面模式（整段 / 自动 / 单列 / 单行）和图像增强开关以提升准确率。
-- 默认在截图后后台自动识别，打开编辑器显示文字；可在 **设置 → OCR** 关闭。自动识别保留剪贴板中的截图；手动点击 OCR 按钮会把识别文字复制到剪贴板。
-
-### 🎬 输出与分享
-- 截图后**自动复制到剪贴板**，并在角落显示悬浮缩略图。
-- **📌 钉图到屏幕** —— 让截图悬浮置顶（拖动移动、滚轮缩放、**Ctrl+滚轮调透明度**、**`O` 或右键→识别文字**、右键菜单可开启鼠标穿透/恢复不透明、双击关闭）。
-- **🎨 美化导出** —— 渐变背景、圆角、投影。
-- **⏺ 录屏** —— 导出 **MP4 / GIF**，帧率可调。
-- **🕘 历史记录** —— 查看最近的截图。
-
-### ⚙️ 工作流
-- **全局快捷键** —— 在设置中为截图、录屏、重复区域、显示窗口等动作录入组合键；支持 GNOME 和 KDE Plasma 5。
-- 可配置保存目录、文件名模板、截图后自动复制 / 自动保存 / 直接打开编辑器。
-- 可在 **设置 → 界面** 切换深色、浅色、Starship 蓝、[One Dark Pro Darker](https://github.com/Binaryify/OneDark-Pro/blob/master/themes/OneDark-Pro-darker.json)、[Vitesse Dark](https://github.com/antfu/vscode-theme-vitesse/blob/main/themes/vitesse-dark.json) 或跟随系统（启动与保存设置时更新），并单独选择强调色；选择后立即预览，点“确定”保存，点“取消”还原。支持**中 / 英双语界面**。新增两套主题按原项目配色适配 Kapture 控件；Starship 蓝参考当前提示符的蓝色语义，不依赖终端的 ANSI 调色板。
-- 主工具区将截图、选项、历史与设置分组；标注和输出分成两行，默认窗口宽度下各功能按钮保持可见。
-- 输出操作从该行左侧开始排列，紧邻“输出”标签。
-- 常驻**系统托盘**，单实例运行。
-
-## 🖼️ 软件截图
-
-| 编辑器 —— 截图、标注与 OCR | 设置 —— 目录、快捷键、OCR、主题 |
-| :---: | :---: |
-| <img src="docs/images/editor.png" alt="Kapture 标注编辑器" width="420" /> | <img src="docs/images/settings.png" alt="Kapture 设置面板" width="420" /> |
-
-## 🚀 安装
-
-> **环境要求：** Kubuntu / Ubuntu / KDE 上的 **X11 会话**。
-> 用 `echo $XDG_SESSION_TYPE` 检查，应输出 `x11`。
-
-### 方式一 —— `.deb` 安装包（推荐）
-
-从 [**Releases**](https://github.com/ycwei5/kapture/releases/latest) 页面下载最新的
-**`kapture_*_all.deb`**，然后：
-
-```bash
-sudo apt install ./kapture_1.0.0_all.deb
-```
-
-`apt` 会自动拉取 Tesseract（中文 + 英文）、ffmpeg、字体和 Qt 运行库。首次安装时会自动创建独立的
-Python 环境，因此**安装过程需要联网**。装好后在应用菜单打开 **Kapture**，或在终端运行 `kapture`。
-卸载用 `sudo apt remove kapture`。
-
-### 方式二 —— 从源码安装
-
-```bash
-# 1. 克隆
-git clone https://github.com/ycwei5/kapture.git
-cd kapture
-
-# 2. 一键安装（系统依赖 + Python 虚拟环境 + 应用菜单图标）
-bash install.sh
-```
-
-安装脚本会用 `apt` 安装 **Tesseract 引擎 + 中文语言包 + ffmpeg**，以及 PyQt5、
-OpenCV、NumPy、Pillow、pynput 等 Python 库。虚拟环境复用这些系统库，`pip` 只安装
-`mss` 和 `pytesseract`，并在应用菜单注册 **Kapture** 图标。启动器会忽略用户目录的
-Python 包，避免它们覆盖系统库。上面的 `.deb` 是上游发布的独立安装包，不使用此脚本。
-
-## ▶️ 使用
-
-- 在应用菜单搜索 **Kapture**，或在终端运行 `./run.sh`。
-- Kapture 单实例运行，关闭主窗口后仍驻留**系统托盘**（右键可退出）。在 **设置 → 常规** 勾选“启动时在后台运行”后，下次启动会隐藏主窗口；可从托盘打开，或运行 `./run.sh --show`。
-- 在 ⚙ **设置 → 快捷键** 点击某项输入框、按下组合键并点“确定”保存；输入框旁的 ✕ 可清除绑定。GNOME 会写入其自定义快捷键，KDE Plasma 5 会写入 KHotKeys。系统已有相同组合键时请先在桌面键盘设置中解除冲突。
-
-### 命令行
-
-`run.sh` 可直接进入某个动作，方便绑定到你自己的快捷键：
-
-```bash
-./run.sh --region    # 区域截图
-./run.sh --window    # 窗口截图
-./run.sh --scroll    # 自动滚动长截图
-./run.sh --manual    # 手动滚动长截图
-./run.sh --color     # 屏幕取色器
-./run.sh --record    # 开始或停止录屏
-./run.sh --repeat    # 重复上次区域截图
-./run.sh --show      # 显示主窗口
-./run.sh --settings  # 打开设置
-./run.sh --background # 隐藏主窗口并留在后台
-```
-
-## 💡 滚动截图小贴士
-
-- 自动长截图按钮右侧菜单可选择向上或向下；手动模式可上下往返滚动，已捕获区域不重复追加。按 **Esc** 随时停止。
-- 抓帧时边框和面板会短暂隐藏以避免阴影入图；选区外没有空间时面板保持隐藏，仍可按 Esc 停止。无法可靠对齐时会提示；自动模式保留连续部分并停止，手动模式请滚回已捕获区域。
-
-- 框选的必须是**可滚动的目标窗口**（浏览器、聊天记录、文档等）。开始后 Kapture 会把鼠标
-  移到所选区域中心并发送滚轮事件，**开始后请不要移动鼠标**。
-- 顶栏「滚速」可调；遇到平滑滚动 / 懒加载页面调慢更稳。
-- 固定的页头 / 页尾在长图里可能重复（滚动截图的通病），当前版本未自动裁切。
-
-## 📦 依赖
-
-| 类型 | 包 |
+| 功能 | 说明 |
 | --- | --- |
-| **系统（apt）** | `tesseract-ocr`、`tesseract-ocr-chi-sim`、`tesseract-ocr-chi-tra`、`fonts-noto-cjk`、`ffmpeg` |
-| **Python（venv）** | `PyQt5`、`mss`、`opencv-python-headless`、`numpy`、`pillow`、`pynput`、`pytesseract` |
+| 截图 | 区域或窗口截图、窗口吸附、屏幕取色、重复上次区域。 |
+| 滚动长截图 | 自动向上或向下，也可手动滚动；提供实时预览并避免重复拼接已采集内容。 |
+| OCR | 中英文识别、截图后自动识别、编辑器局部取词、截屏取词。 |
+| 钉图 | 将剪贴板图片置顶；可移动、缩放、调透明度或复制识别出的文字。 |
+| 编辑导出 | 标注、裁剪、保存、复制，或添加背景与阴影后导出。 |
+| 录屏 | 录制为 MP4 或 GIF，可调帧率。 |
+| 桌面集成 | GNOME 和 KDE Plasma 5 快捷键、主题、系统托盘与后台启动。 |
 
-## ❓ 常见问题
+界面支持简体中文和英文。OCR 使用 Tesseract，录屏使用 ffmpeg。
 
-**支持 Wayland 吗？**
-暂不支持。Kapture 面向 **X11**，因为 Wayland 下模拟滚动和全屏截屏受限。请在 X11 会话下运行
-（`echo $XDG_SESSION_TYPE` → `x11`）。
-
-**OCR 能识别哪些语言？**
-简体中文、繁体中文和英文（`chi_sim+eng`、`chi_sim`、`chi_tra+eng`、`eng`），基于 Tesseract，
-识别结果会复制到剪贴板。
-
-**能截网页的整页 / 长截图吗？**
-可以，这就是**自动滚动长截图**功能：Kapture 自动滚动并把每帧拼成一张长图。
-
-**免费吗？**
-免费，基于 **MIT 协议**开源。
-
-**支持哪些桌面环境？**
-在 **Kubuntu / Ubuntu / KDE Plasma**（X11）上构建和测试。其他 X11 桌面大概率可用，
-全局快捷键可在 GNOME 和 KDE Plasma 5 内直接设置；其他桌面可用上述命令在系统键盘设置中手动绑定。
-
-## 🤝 参与贡献
-
-欢迎提交 Issue 和 Pull Request！发现 bug 或想要新功能，请
-[提一个 issue](https://github.com/ycwei5/kapture/issues)。整个应用就是一个清晰可读的
-`kapture.py`，很容易上手。
-
-## 📄 许可证
-
-[MIT](LICENSE) © 2026 ycwei5
-
----
+## 设置
 
 <div align="center">
-<sub>
 
-**关键词：** Linux 截图工具 · 滚动截图 · 长截图 · 截图 OCR · Tesseract OCR · Ubuntu 截图 ·
-Kubuntu KDE 截图 · Linux 录屏 · 标注工具 · 钉图 · X11 · PyQt5 · Linux 版 Snipaste / ShareX / Flameshot 替代品
+<img src="docs/images/settings.png" alt="Kapture Dev 设置" width="660" />
 
-如果 Kapture 对你有帮助，欢迎点一个 ⭐ Star —— 能帮助更多人发现这个项目。
+<sub>配置快捷键、截图行为、OCR 与界面外观。</sub>
 
-</sub>
 </div>
+
+GNOME 启动时恢复已保存的快捷键，有冲突可在设置中修改。“后台启动”仅隐藏窗口，不等于登录自启。
+
+## 安装
+
+请使用 **X11** 会话。安装脚本面向使用 `apt` 的 Ubuntu 或 Kubuntu，需要联网。
+
+### 从源码安装
+
+```bash
+git clone https://github.com/CyberAn-Dev/kapture-dev.git
+cd kapture-dev
+bash install.sh
+./run.sh
+```
+
+脚本会安装系统依赖并添加应用菜单入口。启动器依赖源码目录，请保留该目录。
+
+### 可选：构建 `.deb`
+
+```bash
+bash build_deb.sh 1.1.0
+sudo apt install ./dist/kapture_1.1.0_all.deb
+```
+
+`1.1.0` 是示例版本号，软件包从当前源码目录构建。安装后运行 `kapture`；卸载使用 `sudo apt remove kapture`。
+
+[上游 Releases](https://github.com/ycwei5/kapture/releases) 提供上游版本，可能不包含本 fork 的改动。
+
+## 命令行
+
+使用 `./run.sh <选项>` 执行一个操作，例如 `./run.sh --region`。
+
+- 截图：`--region`、`--window`、`--scroll`、`--manual`、`--repeat`
+- 其他：`--pin1`、`--pin2`、`--color`、`--record`、`--settings`、`--show`、`--background`
+
+## 使用限制
+
+- 仅支持 X11，暂不支持 Wayland。GNOME 和 KDE Plasma 5 支持在应用内设置全局快捷键。
+- 长截图高度上限为 40,000 像素。动态页面、悬浮层、懒加载和重复内容会影响拼接；本功能不是浏览器整页导出。
+- OCR 效果受文字大小、字体和图像质量影响。需安装 Tesseract 及中英文语言包。
+
+## 贡献与许可证
+
+问题和改进建议请提交到 [Issues](https://github.com/CyberAn-Dev/kapture-dev/issues)，代码贡献请使用 [Pull Requests](https://github.com/CyberAn-Dev/kapture-dev/pulls)。
+
+本项目基于 [ycwei5/kapture](https://github.com/ycwei5/kapture)；MIT 许可证及上游版权信息见 [LICENSE](LICENSE)。主题配色参考 [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) 与 [Vitesse](https://github.com/antfu/vscode-theme-vitesse)。

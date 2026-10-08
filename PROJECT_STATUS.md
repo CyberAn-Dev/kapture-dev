@@ -14,6 +14,8 @@
 
 ## Completed
 
+- 2026-10-08: refreshed both READMEs as the current fork product introduction, covering bidirectional scrolling, OCR text grab, clipboard pins, selection snapping, themes, current repository installation and local package builds. Corrected outdated capture-control and fixed-header descriptions; distinguished background launch from login autostart and upstream packages from fork source. Both introductions now use a compact feature table and shorter setup instructions. Replaced editor/settings images with captures of the current Qt widgets using an isolated configuration and demonstration content; the displayed OCR text was produced by Tesseract. Images were visually inspected.
+
 - 2026-10-08 OCR action styling and shortcut labels: removed the hard-coded translucent gray OCR action backdrop; the panel now matches the editor and buttons inherit theme colors with compact sizing. Added the missing pin1/pin2 action-label mappings, so settings no longer calls both region capture. Live GNOME bindings are Ctrl+1 and Ctrl+2. Theme pixel/label regressions and the full 118-test offscreen suite pass; dark/light renders inspected.
 
 - 2026-10-08 scrolling repair: auto/manual capture now share a background global canvas, support upward/downward extension, reject blank/ambiguous matches, and never bridge an unmatched frame. The toolbar dropdown offers automatic upward capture; manual mode skips transient failures and reports only a stable unmatched view, so the user can return to captured content.

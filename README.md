@@ -1,210 +1,86 @@
-<div align="center">
+# Kapture Dev
 
-<img src="kapture.png" alt="Kapture logo" width="120" />
+**Screenshots, scrolling capture, OCR, annotation, and pinned images for Linux X11.**
 
-# Kapture
+Based on [ycwei5/kapture](https://github.com/ycwei5/kapture), this fork adds bidirectional scrolling capture, OCR text selection, clipboard image pins, window snapping, GNOME shortcut recovery, and more themes.
 
-**A fast, all-in-one screenshot · OCR · screen-recording tool for Linux (X11).**
-
-Region / window / **scrolling long screenshots**, on-image annotation, built-in
-**OCR (Chinese & English)**, screen recording, pin-to-screen, and beautified export —
-all in one lightweight PyQt5 app.
-
-[English](README.md) · [简体中文](README.zh-CN.md)
-
-![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20X11-2b2b2b)
-![Desktop](https://img.shields.io/badge/desktop-Kubuntu%20%C2%B7%20Ubuntu%20%C2%B7%20KDE-1793d1)
-![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
-![PyQt5](https://img.shields.io/badge/GUI-PyQt5-41cd52)
-![License: MIT](https://img.shields.io/badge/license-MIT-green)
-[![Latest release](https://img.shields.io/github/v/release/ycwei5/kapture?label=download&color=6c5ce7)](https://github.com/ycwei5/kapture/releases/latest)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/ycwei5/kapture/pulls)
-
-</div>
-
----
+[简体中文](README.zh-CN.md)
 
 <div align="center">
 
-<img src="docs/images/editor.png" alt="Kapture editor — scrolling screenshot with annotations and OCR" width="820" />
+<img src="docs/images/editor.png" alt="Kapture Dev editor" width="900" />
 
-<sub>The editor: a long screenshot with arrows, boxes, highlight, numbered steps, blur — and one-click OCR.</sub>
+<sub>Current editor with demonstration content and OCR results.</sub>
 
 </div>
 
-## What is Kapture?
+## Features
 
-**Kapture** is a free and open-source **screenshot tool for Linux** that puts capturing,
-**scrolling (long) screenshots**, **OCR text recognition**, image annotation, and **screen recording**
-into a single, keyboard-driven app. It is built with Python + PyQt5 and targets **X11** desktops such as
-**Kubuntu, Ubuntu, and KDE Plasma**.
-
-If you have been looking for a Linux alternative to Snipaste, ShareX, Flameshot, or a
-**Linux scrolling screenshot / long screenshot tool with OCR**, Kapture is built exactly for that.
-
-## ✨ Features
-
-### 📸 Capture
-- **Region capture** — drag a box to grab any part of the screen.
-- **Window capture** — click a window to capture it.
-- **Auto scrolling capture** — Kapture scrolls the target and stitches every frame into one
-  seamless **long screenshot** (perfect for web pages, chat logs, code, documents).
-- **Manual scrolling capture** — you scroll, Kapture stitches.
-- **Repeat last area** — re-shoot the exact same region instantly.
-- **Window snapping** — while selecting, hovering highlights a window and a single click grabs it whole; dragging edges snap to nearby window borders (toggle in **Settings → General**).
-- **Screen color picker** — eyedropper any pixel on screen.
-
-### 🖍️ Annotate
-Rectangle · Ellipse · Arrow · Line · Pen · Text · **Numbered steps** · Highlight ·
-**Blur / mosaic** (hide sensitive info) · **Magnifier** · Crop — with adjustable color &
-line width, plus button or **Ctrl+Z** undo and clear.
-
-### 🔤 OCR (text recognition)
-- Powered by **Tesseract**, recognizes **Simplified / Traditional Chinese and English**.
-- Layout modes (block / auto / single column / single line) and an image-enhance toggle for accuracy.
-- OCR runs in the background after a capture by default, opens the editor, and displays the result; disable it in **Settings → OCR**. Automatic OCR keeps the captured image on the clipboard. Clicking the OCR button manually copies recognized text to the clipboard.
-
-### 🎬 Output & share
-- **Auto-copy to clipboard** after capture, with a floating thumbnail in the corner.
-- **📌 Pin to screen** — keep a screenshot floating on top (drag to move, wheel to zoom, **Ctrl+wheel for transparency**, **`O` or right-click → OCR text**, right-click for click-through / reset opacity, double-click to close).
-- **🎨 Beautify export** — gradient background, rounded corners, drop shadow.
-- **⏺ Screen recording** to **MP4 / GIF** with adjustable frame rate.
-- **🕘 History** of recent captures.
-
-### ⚙️ Workflow
-- **Global keyboard shortcuts** — assign key combinations to capture, recording, repeat-area, and show-window actions in Settings on GNOME or KDE Plasma 5.
-- Configurable save folder, filename template, auto-copy / auto-save / open-editor behavior.
-- Switch between dark, light, Starship Blue, [One Dark Pro Darker](https://github.com/Binaryify/OneDark-Pro/blob/master/themes/OneDark-Pro-darker.json), [Vitesse Dark](https://github.com/antfu/vscode-theme-vitesse/blob/main/themes/vitesse-dark.json), and system appearance in **Settings → Interface** (system preference is read on launch or when saving settings), with a separate accent color choice and a **bilingual UI (中文 / English)**. Selection previews immediately; OK saves it and Cancel restores the previous appearance. The two new palettes adapt their upstream colors to Kapture's controls; Starship Blue follows the prompt's blue color concept rather than the terminal's ANSI palette.
-- Capture, options, history, and settings are visually grouped; annotation and output actions use separate rows so every button remains visible at the default window width.
-- Output actions start beside the Output label. Ctrl+Z undoes annotations in the editor and text edits when the OCR result box has focus.
-- Lives quietly in the **system tray**, single-instance.
-
-## 🖼️ Screenshots
-
-| Editor — capture, annotate & OCR | Settings — folders, shortcuts, OCR, theme |
-| :---: | :---: |
-| <img src="docs/images/editor.png" alt="Kapture annotation editor" width="420" /> | <img src="docs/images/settings.png" alt="Kapture settings dialog" width="420" /> |
-
-## 🚀 Installation
-
-> **Requirements:** an **X11 session** on Kubuntu / Ubuntu / KDE.
-> Check with `echo $XDG_SESSION_TYPE` — it should print `x11`.
-
-### Option A — `.deb` package (recommended)
-
-Download the latest **`kapture_*_all.deb`** from the
-[**Releases**](https://github.com/ycwei5/kapture/releases/latest) page, then:
-
-```bash
-sudo apt install ./kapture_1.0.0_all.deb
-```
-
-`apt` pulls in Tesseract (Chinese + English), ffmpeg, fonts and the Qt runtime automatically.
-On first install it builds an isolated Python environment, so **an internet connection is
-required during installation**. Launch **Kapture** from your app menu, or run `kapture`.
-Uninstall with `sudo apt remove kapture`.
-
-### Option B — from source
-
-```bash
-# 1. Clone
-git clone https://github.com/ycwei5/kapture.git
-cd kapture
-
-# 2. One-shot install (system deps + Python venv + app menu entry)
-bash install.sh
-```
-
-The installer uses `apt` for the **Tesseract engine + Chinese language packs + ffmpeg**
-and for PyQt5, OpenCV, NumPy, Pillow, and pynput. Its virtual environment reuses those
-system packages; `pip` only installs `mss` and `pytesseract`. The launcher ignores user
-site packages so they cannot override the system versions. The `.deb` above is a
-separate upstream package and does not use this script. The installer also registers a
-**Kapture** entry in your application menu.
-
-## ▶️ Usage
-
-- Search **Kapture** in your application menu, **or** run `./run.sh` from the terminal.
-- Kapture runs as a single instance and lives in the **system tray** (right-click to quit).
-- Closing the main window leaves Kapture in the **system tray**. Enable **Settings → General → Start in background** to hide the window on the next launch; use the tray or `./run.sh --show` to reopen it.
-- In ⚙ **Settings → Shortcuts**, click a field, press a key combination, and save. ✕ clears a binding. GNOME stores these as custom shortcuts; KDE Plasma 5 uses KHotKeys. Resolve any existing system shortcut conflict in desktop Keyboard settings.
-
-### Command line
-
-`run.sh` jumps straight to an action — handy for binding to your own hotkeys:
-
-```bash
-./run.sh --region    # region capture
-./run.sh --window    # window capture
-./run.sh --scroll    # auto scrolling long screenshot
-./run.sh --manual    # manual scrolling long screenshot
-./run.sh --color     # screen color picker
-./run.sh --record    # start or stop recording
-./run.sh --repeat    # repeat last capture area
-./run.sh --show      # show the main window
-./run.sh --settings  # open settings
-./run.sh --background # hide the main window and keep running
-```
-
-## 💡 Tips for scrolling capture
-
-- The auto-capture button dropdown offers upward or downward scrolling. Manual mode supports scrolling both ways without appending already captured content. Press **Esc** to stop.
-- Borders and controls briefly hide for each grab to exclude their shadows. If no room exists outside the selection, the panel stays hidden; Esc still works. Unreliable alignment is reported: auto mode stops with the continuous partial image; in manual mode, return to captured content.
-
-- Select a **scrollable target window** (browser, chat, document). When capture starts,
-  Kapture moves the cursor to the center of the selected area and sends scroll-wheel events —
-  **don't move the mouse** after it begins.
-- Use the **Speed** control in the top bar; lower it for smooth-scrolling / lazy-loading pages.
-- Sticky headers/footers may repeat in a long screenshot (a common limitation of scrolling
-  capture); the current version does not auto-trim them.
-
-## 📦 Dependencies
-
-| Type | Packages |
+| Tool | What it does |
 | --- | --- |
-| **System (apt)** | `tesseract-ocr`, `tesseract-ocr-chi-sim`, `tesseract-ocr-chi-tra`, `fonts-noto-cjk`, `ffmpeg` |
-| **Python (venv)** | `PyQt5`, `mss`, `opencv-python-headless`, `numpy`, `pillow`, `pynput`, `pytesseract` |
+| Capture | Region or window capture, window snapping, color picker, and repeat last region. |
+| Scrolling capture | Automatic up/down or manual scrolling, with live preview and duplicate-aware stitching. |
+| OCR | Chinese and English recognition, automatic OCR after capture, editor text selection, and screen text grab. |
+| Pin images | Keep clipboard images on top; move, resize, adjust opacity, or copy recognized text. |
+| Edit and export | Annotate, crop, save, copy, or export with a background and shadow. |
+| Record | Capture the screen as MP4 or GIF; adjust frame rate. |
+| Desktop | GNOME and KDE Plasma 5 shortcuts, themes, system tray, and background launch. |
 
-## ❓ FAQ
+The app has English and Simplified Chinese interfaces. OCR uses Tesseract; screen recording uses ffmpeg.
 
-**Does Kapture work on Wayland?**
-Not yet. Kapture targets **X11**, because simulated scrolling and full-screen grabbing are
-restricted under Wayland. Run on an X11 session (`echo $XDG_SESSION_TYPE` → `x11`).
-
-**Which languages can the OCR read?**
-Simplified Chinese, Traditional Chinese, and English (`chi_sim+eng`, `chi_sim`, `chi_tra+eng`, `eng`),
-powered by Tesseract. Recognized text is copied to your clipboard.
-
-**Can it take a full-page / long screenshot of a web page?**
-Yes — that is the **auto scrolling capture** feature. Kapture scrolls and stitches frames into one tall image.
-
-**Is it free?**
-Yes, Kapture is open source under the **MIT License**.
-
-**Which desktops are supported?**
-Built and tested on **Kubuntu / Ubuntu / KDE Plasma** on X11. Other X11 desktops likely work;
-the global-shortcut writer supports GNOME and KDE Plasma 5; other desktops can bind the command-line actions in their keyboard settings.
-
-## 🤝 Contributing
-
-Issues and pull requests are welcome! If you hit a bug or want a feature, please
-[open an issue](https://github.com/ycwei5/kapture/issues). The whole app is a single,
-readable `kapture.py` — easy to dive into.
-
-## 📄 License
-
-[MIT](LICENSE) © 2026 ycwei5
-
----
+## Settings
 
 <div align="center">
-<sub>
 
-**Keywords:** Linux screenshot tool · scrolling screenshot · long screenshot · screenshot OCR ·
-Tesseract OCR Linux · screen capture Ubuntu · Kubuntu KDE screenshot · screen recorder Linux ·
-annotation tool · pin screenshot · X11 · PyQt5 · Snipaste / ShareX / Flameshot alternative for Linux
+<img src="docs/images/settings.png" alt="Kapture Dev settings" width="660" />
 
-If Kapture is useful to you, please consider giving it a ⭐ — it helps others discover the project.
+<sub>Configure shortcuts, capture behavior, OCR, and appearance.</sub>
 
-</sub>
 </div>
+
+GNOME restores saved Kapture shortcuts at startup. Change conflicting combinations in Settings. Background launch hides the window; it does not enable login autostart.
+
+## Install
+
+Use an **X11** session. The install scripts target Ubuntu or Kubuntu with `apt` and require internet access.
+
+### From source
+
+```bash
+git clone https://github.com/CyberAn-Dev/kapture-dev.git
+cd kapture-dev
+bash install.sh
+./run.sh
+```
+
+The installer adds system dependencies and an application-menu entry. Keep the checkout in place because the launcher uses its path.
+
+### Optional: build a `.deb`
+
+```bash
+bash build_deb.sh 1.1.0
+sudo apt install ./dist/kapture_1.1.0_all.deb
+```
+
+`1.1.0` is an example version. The package is built from the current checkout; launch with `kapture` and remove with `sudo apt remove kapture`.
+
+Upstream [releases](https://github.com/ycwei5/kapture/releases) contain the upstream app and may not include this fork's changes.
+
+## Command line
+
+Run one action with `./run.sh <option>`, for example `./run.sh --region`.
+
+- Capture: `--region`, `--window`, `--scroll`, `--manual`, `--repeat`
+- Other: `--pin1`, `--pin2`, `--color`, `--record`, `--settings`, `--show`, `--background`
+
+## Limits
+
+- X11 only; Wayland is not supported. In-app global shortcut setup is available on GNOME and KDE Plasma 5.
+- Scrolling capture is limited to 40,000 pixels in height. Dynamic pages, overlays, lazy loading, and repeated content can affect alignment; it is not a browser full-page export.
+- OCR accuracy depends on text size, font, and image quality. Tesseract and its Chinese and English language packs must be installed.
+
+## Contribute and license
+
+Report issues or propose changes in [Issues](https://github.com/CyberAn-Dev/kapture-dev/issues) and [Pull Requests](https://github.com/CyberAn-Dev/kapture-dev/pulls).
+
+Based on [ycwei5/kapture](https://github.com/ycwei5/kapture); see [LICENSE](LICENSE) for the MIT license and upstream copyright. Theme palettes are adapted from [One Dark Pro](https://github.com/Binaryify/OneDark-Pro) and [Vitesse](https://github.com/antfu/vscode-theme-vitesse).
