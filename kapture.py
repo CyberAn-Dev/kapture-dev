@@ -1074,32 +1074,59 @@ class RegionSelector(QtWidgets.QWidget):
 # --------------------------------------------------------------------------- #
 # Floating control bar for manual scrolling capture
 # --------------------------------------------------------------------------- #
-class ScrollRegionOverlay(QtWidgets.QWidget):
-    """Transparent bypass-WM overlay outlining the scrolling-capture region in red.
+class ScrollRegionOverlay:
+    """Red outline around the scrolling-capture region, PixPin-style.
 
-    Click-through (mouse events fall through to the app underneath, so the user can
-    still scroll it); draws only the border so the region content stays fully visible.
+    Deliberately NOT one full-desktop translucent window: Qt's
+    WA_TransparentForMouseEvents is application-local and does not make an X11
+    top-level click-through, so such an overlay swallows the wheel events the
+    scrolling capture depends on (the bug it caused). Instead the frame is four
+    thin always-on-top strips that lie entirely outside the region and are
+    mouse-transparent, so the pointer always reaches the target window.
     """
+    THICK = 3
+
     def __init__(self, region: QRect, color="#e74c3c"):
+        self._wins = []
+        r = QRect(region)
+        t = self.THICK
+        bars = (QRect(r.left() - t, r.top() - t, r.width() + 2 * t, t),      # top
+                QRect(r.left() - t, r.bottom(), r.width() + 2 * t, t),       # bottom
+                QRect(r.left() - t, r.top(), t, r.height()),                 # left
+                QRect(r.right(), r.top(), t, r.height() + t))                # right
+        for rect in bars:
+            w = _BorderStrip(rect, color)
+            self._wins.append(w)
+
+    def close(self):
+        for w in self._wins:
+            w.close()
+
+    def deleteLater(self):                              # noqa: N802 - Qt-style API
+        for w in self._wins:
+            w.deleteLater()
+        self._wins = []
+
+    def isVisible(self):                                # noqa: N802 - Qt-style API
+        return any(w.isVisible() for w in self._wins)
+
+
+class _BorderStrip(QtWidgets.QWidget):
+    """One thin solid-color always-on-top strip; transparent to the mouse so it
+    can never steal wheel events from the capture target."""
+    def __init__(self, rect: QRect, color):
         super().__init__()
+        self._color = QtGui.QColor(color)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
                             Qt.X11BypassWindowManagerHint | Qt.WindowDoesNotAcceptFocus)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        vg = QtWidgets.QApplication.primaryScreen().virtualGeometry()
-        self.setGeometry(vg)
-        self._rect = QRect(region)
-        self._rect.translate(-vg.topLeft())
-        self._color = QtGui.QColor(color)
+        self.setGeometry(rect)
         self.show()
         self.raise_()
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.setRenderHint(QtGui.QPainter.Antialiasing)
-        pen = QtGui.QPen(self._color, 3)
-        p.setPen(pen); p.setBrush(Qt.NoBrush)
-        p.drawRect(self._rect.adjusted(1, 1, -2, -2))
+        p.fillRect(self.rect(), self._color)
 
 
 class ScrollHud(QtWidgets.QWidget):

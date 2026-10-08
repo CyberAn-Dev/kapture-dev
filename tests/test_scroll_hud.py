@@ -92,15 +92,25 @@ class ScrollHudTest(unittest.TestCase):
         hud.set_image(None)                  # must not raise
         hud.close()
 
-    def test_region_overlay_is_click_through_and_full_virtual_desktop(self):
-        ov = kapture.ScrollRegionOverlay(QtCore.QRect(10, 20, 100, 50))
-        self.assertTrue(ov.testAttribute(QtCore.Qt.WA_TransparentForMouseEvents))
-        self.assertTrue(ov.testAttribute(QtCore.Qt.WA_TranslucentBackground))
-        flags = ov.windowFlags()
-        self.assertTrue(flags & QtCore.Qt.X11BypassWindowManagerHint)
-        self.assertEqual(ov.geometry(),
-                         QtWidgets.QApplication.instance().primaryScreen().virtualGeometry())
+    def test_region_overlay_bars_outside_region_and_click_through(self):
+        """Regression: the old full-desktop overlay swallowed the wheel events
+        scrolling capture needs — the frame must never cover the region."""
+        region = QtCore.QRect(100, 100, 400, 300)
+        ov = kapture.ScrollRegionOverlay(region)
+        self.assertEqual(len(ov._wins), 4)
+        vg = QtWidgets.QApplication.instance().primaryScreen().virtualGeometry()
+        for w in ov._wins:
+            self.assertTrue(w.testAttribute(QtCore.Qt.WA_TransparentForMouseEvents))
+            flags = w.windowFlags()
+            self.assertTrue(flags & QtCore.Qt.X11BypassWindowManagerHint)
+            self.assertLessEqual(w.width(), region.width() + 2 * kapture.ScrollRegionOverlay.THICK)
+            self.assertLessEqual(w.height(), region.height() + 2 * kapture.ScrollRegionOverlay.THICK)
+            self.assertTrue(vg.contains(w.geometry()))
+            # no strip may overlap the capture region itself (inner edge touches it)
+            inter = w.geometry().intersected(region)
+            self.assertTrue(inter.isEmpty() or inter.width() <= 1 or inter.height() <= 1)
         ov.close()
+        self.assertFalse(ov.isVisible())
 
 
 class ScrollModeWiringTest(unittest.TestCase):
