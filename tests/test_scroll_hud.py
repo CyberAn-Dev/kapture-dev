@@ -264,14 +264,15 @@ class ScrollModeWiringTest(unittest.TestCase):
         self.assertIsNone(self.window._scroll_overlay)
         self.assertFalse(hud.isVisible())
 
-    def test_manual_stop_closes_hud(self):
+    def test_manual_stop_finishes_via_worker_result(self):
         img = np.full((600, 800, 3), 255, dtype=np.uint8)
-        self.window._m_timer = None
-        self.window._m_acc = img
+        self.window.worker = kapture.CaptureWorker((0, 0, 800, 600), manual=True)
         self.window._scroll_hud = kapture.ScrollHud(QtCore.QRect(0, 0, 10, 10),
                                                     lambda: None)
         with mock.patch.object(self.window, "_present_capture") as present:
             self.window._manual_stop()
+            self.assertTrue(self.window.worker._abort)
+            self.window._on_capture_done(img)
         present.assert_called_once()
         self.assertIsNone(self.window._scroll_hud)
 

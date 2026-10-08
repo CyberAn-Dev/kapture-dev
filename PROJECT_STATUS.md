@@ -12,6 +12,11 @@
 
 ## Completed
 
+- 2026-10-08 scrolling repair: auto/manual capture now share a background global canvas, support upward/downward extension, reject blank/ambiguous matches, and never bridge an unmatched frame. The toolbar dropdown offers automatic upward capture; manual mode reports failed alignment so the user can return to captured content.
+- Every grab temporarily hides capture borders and HUD to exclude their compositor shadows. Full-screen selections hide the HUD rather than place it inside the image; global Esc stops either mode. Preview aspect ratio and original pixel-height reporting are corrected.
+- Clipboard history retains images that differ only in central pixels; annotated-save failure reports failure without writing an unannotated fallback.
+- Verification: 82 offscreen tests pass, including observed failing-to-passing regressions for blank growth, gap bridging, preview distortion, HUD overlap, clipboard sampling, and failed saves. A real X11 static-page run produced five frames with zero changed pixels against the no-controls baseline, stopped via Esc in about 1.8 s total, and kept the GUI timer responsive. Real X11 numbered-text pages also passed manual up/down revisits (10 frames) and automatic upward scrolling: both produced the exact expected 1000-pixel image. This is controlled-page evidence, not proof for every animated/sticky-header website.
+
 - Updated `install.sh`, `run.sh`, and both READMEs for the source installation path.
 - Verified shell syntax, apt dependency resolution, and imports of the reused system packages in a temporary virtual environment.
 - Fixed the settings dialog on non-KDE desktops by using KDE shortcut tools only in a supported Plasma 5 session, and by refreshing the KDE menu cache only when its command exists.
@@ -44,9 +49,11 @@
 - 美化导出 (beautify export) confirmed functional but niche: it composites the annotated screenshot onto a pink/violet gradient with rounded corners and shadow and saves a PNG (macOS-style share image). Handling undecided — awaiting user decision.
 - Root-caused the recurring "Alt+\` only works after visiting settings": something clobbers the master `custom-keybindings` array around login, keeping only what Kapture registers at startup (pin1/pin2 via DEFAULT_KEYS); region's binding stayed stored but unregistered, which settings-save repaired manually. Startup now self-heals — every stored binding is re-registered into the master array, repeated once after 6 s; live-verified the array holds region after restart + retry. 61 tests green (2 new self-heal cases).
 - Long-capture quality pass (user feedback "shadow at every scroll edge, not smooth"): the earlier "red frame captured" was fixed (QRect right()/bottom() off-by-one; strips moved fully outside the region), and the reported per-scroll "shadow band" turned out to be stitching seams — template matching alone placed the seam off by a few rows on animated/teared frames, duplicating or dropping content at every step. New `refine_new_start` snaps the seam (±16-row search, min abs-diff against the previous frame's bottom) in both auto and manual paths. 63 tests green.
-- Manual scrolling capture rewritten onto a PixPin-style global canvas (`locate_frame`/`stitch_frame`): every frame is located on the accumulated canvas and only out-of-canvas rows extend it, so scrolling up and back down contributes nothing instead of duplicating regions; scrolling past the start prepends. Auto mode keeps the pairwise+refine path (it drives its own constant scroll). Awaiting live confirmation with vigorous up/down scrolling.
+- The initial manual global-canvas implementation is superseded by the shared auto/manual worker and overlap validation described above.
 
 ## Blockers and next step
+
+- Ambiguous repeated rows, fixed overlays, and animated content may stop automatic capture early or require scrolling back in manual mode. The application reports alignment failure and preserves the continuous result; arbitrary-page quality is not claimed. Capture controls briefly hide for each frame; compositor timing outside this tested X11 session remains to be validated.
 
 - A full source installation was not run because it requires administrator access and a download of the two remaining Python packages.
 - The upstream `.deb` is independent of this repository's install script and code changes; build and publish a fork release package to distribute them through `.deb`.

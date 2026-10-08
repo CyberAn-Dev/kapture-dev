@@ -1,0 +1,114 @@
+import os
+import unittest
+from unittest import mock
+
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+import numpy as np
+from PyQt5 import QtCore, QtGui, QtWidgets
+import kapture
+
+
+class ScrollRegressionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def test_static_blank_does_not_grow(self):
+        frame = np.full((400, 300, 3), 255, np.uint8)
+        y, _ = kapture.locate_frame(frame, frame, 0)
+        self.assertEqual(y, 0)
+        self.assertEqual(kapture.refine_frame_offset(frame, frame, y), 0)
+
+    def test_constant_changed_frame_is_not_a_location(self):
+        first = np.full((400, 300, 3), 255, np.uint8)
+        second = np.full_like(first, 100)
+        self.assertIsNone(kapture.locate_frame(first, second, 0)[0])
+
+    def test_down_up_down_matches_page_pixels(self):
+        page = np.random.RandomState(45).randint(0, 256, (1600, 180, 3), dtype=np.uint8)
+        canvas, hint, origin = page[400:800].copy(), 0, 400
+        for top in [550, 400, 250, 100, 250, 400, 550, 700]:
+            frame = page[top:top+400]
+            y, _ = kapture.locate_frame(canvas, frame, hint)
+            self.assertEqual(y, top-origin)
+            y = kapture.refine_frame_offset(canvas, frame, y)
+            canvas, hint = kapture.stitch_frame(canvas, frame, y)
+            origin = min(origin, top)
+        np.testing.assert_array_equal(canvas, page[100:1100])
+
+    def test_preview_uses_thumbnail_aspect_and_original_height(self):
+        hud = kapture.ScrollHud(QtCore.QRect(0, 0, 400, 300), lambda: None)
+        self.addCleanup(hud.close)
+        hud.set_image((np.zeros((1200, 240, 3), np.uint8), 6000))
+        pm = hud.thumb.pixmap()
+        self.assertEqual((pm.width(), pm.height()), (48, 240))
+        self.assertIn('6000', hud.lbl.text())
+
+    def test_fullscreen_region_never_has_visible_hud_inside(self):
+        region = self.app.primaryScreen().virtualGeometry()
+        hud = kapture.ScrollHud(region, lambda: None)
+        self.addCleanup(hud.close)
+        hud.show_on_top()
+        self.assertFalse(hud.isVisible() and hud.geometry().intersects(region))
+
+    def test_auto_unmatched_frame_cannot_bridge_a_gap(self):
+        page = np.random.RandomState(6).randint(0, 256, (2000, 100, 3), dtype=np.uint8)
+        worker = kapture.CaptureWorker((0, 0, 100, 400), max_iters=3)
+        results = []
+        worker.finished_img.connect(results.append)
+        with mock.patch.object(kapture, 'MouseController'), mock.patch.object(kapture.time, 'sleep'), mock.patch.object(kapture, 'grab_region', side_effect=[page[:400], page[900:1300], page[1000:1400], page[1100:1500]]):
+            worker.run()
+        np.testing.assert_array_equal(results[0], page[:400])
+
+    def test_auto_up_produces_exact_page_pixels(self):
+        page = np.random.RandomState(8).randint(0, 256, (1000, 100, 3), dtype=np.uint8)
+        worker = kapture.CaptureWorker((0, 0, 100, 400), max_iters=2, direction=-1)
+        results = []
+        worker.finished_img.connect(results.append)
+        with mock.patch.object(kapture, 'MouseController') as mouse, mock.patch.object(kapture.time, 'sleep'), mock.patch.object(kapture, 'grab_region', side_effect=[page[400:800], page[200:600], page[:400]]):
+            worker.run()
+        np.testing.assert_array_equal(results[0], page[:800])
+        self.assertEqual(mouse.return_value.scroll.call_args_list,
+                         [mock.call(0, 3), mock.call(0, 3)])
+
+    def test_repeated_rows_with_no_unique_anchor_are_rejected(self):
+        rows = np.random.RandomState(2).randint(0, 256, (20, 100, 3), dtype=np.uint8)
+        page = np.tile(rows, (40, 1, 1))
+        self.assertIsNone(kapture.locate_frame(page[:400], page[10:410])[0])
+
+    def test_numbered_text_rows_are_distinguishable(self):
+        image = QtGui.QImage(540, 1000, QtGui.QImage.Format_RGB32)
+        image.fill(QtCore.Qt.white)
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtCore.Qt.black)
+        for y in range(0, 1000, 25):
+            painter.drawText(15, y+19, f'Row {y//25:03d} repeated text 0123456789')
+        painter.end()
+        bgra = np.frombuffer(image.constBits().asstring(image.sizeInBytes()), np.uint8).reshape(1000, 540, 4)
+        page = bgra[:, :, :3].copy()
+        y, _ = kapture.locate_frame(page[300:700], page[450:850])
+        self.assertEqual(y, 150)
+        # Shared boilerplate must not bridge a missing interval when only the
+        # row numbers distinguish two non-overlapping viewports.
+        self.assertIsNone(kapture.locate_frame(page[:400], page[600:1000])[0])
+
+    def test_manual_worker_handles_reverse_scroll_without_mouse_injection(self):
+        page = np.random.RandomState(3).randint(0, 256, (1000, 100, 3), dtype=np.uint8)
+        worker = kapture.CaptureWorker((0, 0, 100, 400), manual=True)
+        frames = iter([page[200:600], page[400:800], page[200:600], page[:400]])
+        results = []
+        worker.finished_img.connect(results.append)
+        def grab(*args):
+            try:
+                return next(frames)
+            except StopIteration:
+                worker.abort()
+                return None
+        with mock.patch.object(kapture, 'MouseController') as mouse, mock.patch.object(kapture.time, 'sleep'), mock.patch.object(kapture, 'grab_region', side_effect=grab):
+            worker.run()
+        mouse.assert_not_called()
+        np.testing.assert_array_equal(results[0], page[:800])
+
+
+if __name__ == '__main__':
+    unittest.main()

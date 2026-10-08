@@ -14,7 +14,7 @@ Dependencies (system, install via apt): tesseract-ocr (+ language packs), ffmpeg
 
 import sys
 import time
-import hashlib
+import threading
 
 import cv2
 import numpy as np
@@ -22,6 +22,8 @@ from PIL import Image
 
 import mss
 from pynput.mouse import Controller as MouseController
+from pynput.keyboard import Listener as KeyListener, Key
+from Xlib.error import ConnectionClosedError
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal
@@ -242,8 +244,12 @@ TR = {
     "hud_stop": {"zh": "⏹ 停止", "en": "⏹ Stop"},
     "hud_auto": {"zh": "自动滚动拼接中…请勿移动鼠标",
                  "en": "Auto stitching… keep the mouse still"},
-    "hud_manual": {"zh": "手动滚动中…向下滚动目标窗口，完成后点停止",
-                   "en": "Manual scroll… scroll the target down, stop when done"},
+    "hud_manual": {"zh": "可上下滚动；完成后点停止或按 Esc",
+                   "en": "Scroll up/down; Stop or Esc when done"},
+    "scroll_unmatched": {"zh": "无法对齐：请滚回已捕获区域；自动模式已停止并保留连续部分",
+                         "en": "Cannot align: return to captured area; auto mode stopped with continuous result"},
+    "scroll_down": {"zh": "自动向下滚动", "en": "Auto scroll down"},
+    "scroll_up": {"zh": "自动向上滚动", "en": "Auto scroll up"},
     "t_ocr_all": {"zh": "全部识别", "en": "Recognize all"},
     "t_copy_all": {"zh": "全部复制", "en": "Copy all"},
     "card_edit": {"zh": "编辑标注", "en": "Edit annotations"},
@@ -815,40 +821,62 @@ def find_new_content(prev_bgr, cur_bgr, min_confidence=0.5):
     return new_start, max_val
 
 
-def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.5):
-    """Where does this viewport frame belong on the global canvas?
+def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
+    """Locate an overlapping viewport; reject blank and ambiguous matches.
 
-    PixPin-style canvas stitching: match the frame's top and bottom strips
-    against the canvas (around y_hint ± band for speed) and return the offset
-    y of the frame's top row on the canvas. y may be negative (frame pokes
-    above the canvas top after scrolling up) or place the frame bottom past
-    the canvas bottom (new content below). Returns (None, conf) when nothing
-    trustworthy matched — the caller then simply ignores the frame, which
-    loses at worst a stretch of fast scroll but never duplicates content.
+    Only the bounded search band is converted, independent of total page height.
+    A strip proposes offsets; the entire overlap must agree before extending.
     """
     ch, h = canvas_bgr.shape[0], frame_bgr.shape[0]
     if h > ch:
         return None, 0.0
-    cg = cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2GRAY)
+    hint = int(y_hint)
+    if 0 <= hint <= ch - h and np.array_equal(canvas_bgr[hint:hint+h], frame_bgr):
+        return hint, 1.0
+    y0, y1 = max(0, hint-band), min(ch, hint+band+h)
+    cg = cv2.cvtColor(canvas_bgr[y0:y1], cv2.COLOR_BGR2GRAY)
     fg = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-    s = max(24, h // 4)
-    y0 = max(0, int(y_hint) - band)
-    y1 = min(ch, int(y_hint) + band + h)          # cap the search band; a scroll
-    if y1 - y0 < s:                                # step between ticks stays small
-        y0 = max(0, min(y0, ch - s))
-        y1 = ch
-    best_y, best_conf = None, 0.0
-    for strip, base in ((fg[:s, :], 0), (fg[h - s:h, :], h - s)):
-        if y0 + s > y1:
-            break
-        res = cv2.matchTemplate(cg[y0:y1, :], strip, cv2.TM_CCOEFF_NORMED)
-        _, mx, _, loc = cv2.minMaxLoc(res)
-        y = y0 + loc[1] - base
-        if mx > best_conf:
-            best_y, best_conf = y, mx
-    if best_y is not None and best_conf >= conf_min:
-        return best_y, best_conf
-    return None, best_conf
+    strip_h = min(h, max(24, h // 4))
+    candidates = set()
+    confidence = 0.0
+    for base in (0, (h-strip_h)//2, h-strip_h):
+        strip = fg[base:base+strip_h]
+        if strip.std() < 2 or cg.shape[0] < strip_h:
+            continue
+        scores = cv2.matchTemplate(cg, strip, cv2.TM_CCOEFF_NORMED).ravel()
+        confidence = max(confidence, float(scores.max()))
+        # Bound work even on repeated table rows; ambiguity is rejected below.
+        for _ in range(8):
+            loc = int(scores.argmax())
+            if scores[loc] < conf_min:
+                break
+            candidates.add(y0+loc-base)
+            scores[max(0, loc-2):loc+3] = -1
+    ranked = []
+    for y in candidates:
+        lo, hi = max(y0, y), min(y1, y+h)
+        if hi-lo < strip_h:
+            continue
+        delta = np.abs(cg[lo-y0:hi-y0].astype(np.int16) -
+                       fg[lo-y:hi-y].astype(np.int16))
+        error = float(delta.mean())
+        # White margins dilute mean error on text pages. Differences in a
+        # few glyphs on most rows still mean two different sections, even
+        # when all their boilerplate matches. Permit localized animation,
+        # but not widespread inconsistent rows.
+        inconsistent_rows = np.count_nonzero(delta > 16, axis=1) > max(2, fg.shape[1] * 0.003)
+        if error <= 12 and inconsistent_rows.mean() <= 0.1:
+            ranked.append((error, y))
+    ranked.sort()
+    if not ranked:
+        return None, min(confidence, 0.49)
+    error, y = ranked[0]
+    # On a static text page only a few glyph pixels may distinguish rows.
+    # A fixed one-level mean tolerance incorrectly erases that evidence.
+    tolerance = max(0.001, error * 0.1)
+    if any(abs(other-y) > 2 and err <= error+tolerance for err, other in ranked[1:]):
+        return None, 0.0
+    return y, max(conf_min, 1-error/255)
 
 
 def stitch_frame(canvas_bgr, frame_bgr, y):
@@ -859,38 +887,30 @@ def stitch_frame(canvas_bgr, frame_bgr, y):
     if y < 0:
         canvas_bgr = np.vstack([frame_bgr[:-y, :], canvas_bgr])
         y = 0
+    ch = canvas_bgr.shape[0]
     if y + h > ch:
         canvas_bgr = np.vstack([canvas_bgr, frame_bgr[ch - y:, :]])
     return canvas_bgr, y
 
 
 def refine_frame_offset(canvas_bgr, frame_bgr, y, win=8, rows=160):
-    """Snap a located frame to the canvas by minimizing real pixel difference over
-    the overlap near the seam.
-
-    locate_frame matches a quarter-height strip, which is precise for static pages
-    but can still land a few rows off on animated or teared scroll frames; those
-    rows then duplicate or drop at the append point and read as a shadow band at
-    every scroll step. Checking y ± win against the rows both actually share fixes
-    the last few pixels for free (the overlap is already on hand)."""
+    """Refine near the seam only; equal scores preserve the proposed location."""
     ch, h = canvas_bgr.shape[0], frame_bgr.shape[0]
     if win <= 0 or h > ch:
         return y
-    cg = cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2GRAY).astype(np.int16)
-    fg = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.int16)
-    best_off, best_diff = 0, None
-    for off in range(-win, win + 1):
-        yy = y + off
-        lo = max(0, yy)                       # overlap on canvas coords
-        hi = min(ch, yy + h)
-        if hi - lo < min(rows, h) // 2:
+    best_y, best_diff = y, float("inf")
+    for off in sorted(range(-win, win+1), key=abs):
+        yy = y+off
+        lo, hi = max(0, yy), min(ch, yy+h)
+        if hi-lo < min(rows, h)//2:
             continue
-        a = cg[lo:hi, :]
-        b = fg[lo - yy:hi - yy, :]
-        diff = int(np.abs(a[-rows:, :] - b[-rows:, :]).mean())
-        if best_diff is None or diff < best_diff:
-            best_off, best_diff = off, diff
-    return y + best_off
+        lo = max(lo, hi-rows)
+        a = canvas_bgr[lo:hi].astype(np.int16)
+        b = frame_bgr[lo-yy:hi-yy].astype(np.int16)
+        diff = float(np.abs(a-b).mean())
+        if diff < best_diff:
+            best_y, best_diff = yy, diff
+    return best_y
 
 
 def refine_new_start(prev_bgr, cur_bgr, new_start, win=16, strip=10):
@@ -920,86 +940,104 @@ def refine_new_start(prev_bgr, cur_bgr, new_start, win=16, strip=10):
 
 
 class CaptureWorker(QThread):
-    """Run scrolling + frame grabbing + stitching on a background thread to avoid freezing the UI."""
+    """Shared automatic/manual capture and global-canvas stitching worker."""
     progress = pyqtSignal(str)
-    frame = pyqtSignal(object)        # latest stitched image for the live HUD preview
-    finished_img = pyqtSignal(object)   # emits the stitched BGR numpy image, or None on failure
+    frame = pyqtSignal(object)
+    finished_img = pyqtSignal(object)
+    preparing_grab = pyqtSignal()
+    grabbed = pyqtSignal()
 
     def __init__(self, rect_phys, scroll_clicks=3, settle=0.45,
-                 max_iters=80, max_height=40000, parent=None):
+                 max_iters=80, max_height=40000, parent=None,
+                 manual=False, direction=1):
         super().__init__(parent)
         self.left, self.top, self.width, self.height = rect_phys
-        self.scroll_clicks = scroll_clicks
-        self.settle = settle
-        self.max_iters = max_iters
-        self.max_height = max_height
+        self.scroll_clicks, self.settle = scroll_clicks, settle
+        self.max_iters, self.max_height = max_iters, max_height
+        self.manual, self.direction = manual, direction
         self._abort = False
+        self.hide_ui_for_grab = False
+        self.grab_ready = threading.Event()
 
     def abort(self):
         self._abort = True
+        self.grab_ready.set()
+
+    def _grab(self):
+        if self._abort:
+            return None
+        if self.hide_ui_for_grab:
+            self.grab_ready.clear()
+            if self._abort:
+                return None
+            self.preparing_grab.emit()
+            if not self.grab_ready.wait(3):
+                raise RuntimeError("Capture controls did not hide in time")
+        if self._abort:
+            return None
+        try:
+            return grab_region(self.left, self.top, self.width, self.height)
+        finally:
+            if self.hide_ui_for_grab:
+                self.grabbed.emit()
+
+    def _preview(self, canvas):
+        image = canvas
+        if canvas.shape[0] > 1200:
+            scale = 1200/canvas.shape[0]
+            image = cv2.resize(canvas, (max(1, int(canvas.shape[1]*scale)), 1200))
+        self.frame.emit((image, int(canvas.shape[0])))
 
     def run(self):
+        canvas = None
         try:
-            mouse = MouseController()
-            cx = self.left + self.width // 2
-            cy = self.top + self.height // 2
-
-            # physical pixels -> logical coordinates for pynput (pynput uses logical coordinates)
-            dpr = getattr(self, "dpr", 1.0)
-            mouse.position = (int(cx / dpr), int(cy / dpr))
-            time.sleep(0.2)
-
-            accumulated = grab_region(self.left, self.top, self.width, self.height)
-            prev = accumulated.copy()
-            no_progress = 0
-
-            for i in range(self.max_iters):
-                if self._abort:
-                    self.progress.emit("Cancelled")
+            mouse = None
+            if not self.manual:
+                mouse = MouseController()
+                dpr = getattr(self, "dpr", 1.0)
+                mouse.position = (int((self.left+self.width//2)/dpr),
+                                  int((self.top+self.height//2)/dpr))
+                time.sleep(0.2)
+            canvas = self._grab()
+            if canvas is None:
+                return
+            self._preview(canvas)
+            y_hint, stationary, iteration = 0, 0, 0
+            while not self._abort and (self.manual or iteration < self.max_iters):
+                iteration += 1
+                if mouse is not None:
+                    mouse.scroll(0, -self.direction*self.scroll_clicks)
+                time.sleep(0.25 if self.manual else self.settle)
+                cur = self._grab()
+                if cur is None:
                     break
-
-                mouse.scroll(0, -self.scroll_clicks)
-                time.sleep(self.settle)
-                cur = grab_region(self.left, self.top, self.width, self.height)
-
-                new_start, conf = find_new_content(prev, cur)
-                self.progress.emit(
-                    f"Frame {i + 1}: confidence {conf:.2f}, height {accumulated.shape[0]} px"
-                )
-
-                if conf < 0.45:
-                    # Match unreliable (content changed too much / animation); conservatively retry one frame
-                    no_progress += 1
-                elif new_start >= cur.shape[0] - 2:
-                    # No new content -- most likely reached the bottom
-                    no_progress += 1
-                else:
-                    new_start = refine_new_start(prev, cur, new_start)
-                    new_part = cur[new_start:, :]
-                    accumulated = np.vstack([accumulated, new_part])
-                    no_progress = 0
-                    # live HUD preview: downscale the stitched result so the queued
-                    # signal stays cheap even for very long captures
-                    prev_img = accumulated
-                    if accumulated.shape[0] > 1200:
-                        s = 1200.0 / accumulated.shape[0]
-                        prev_img = cv2.resize(
-                            accumulated, (max(1, int(accumulated.shape[1] * s)), 1200))
-                    self.frame.emit((prev_img, int(accumulated.shape[0])))
-
-                prev = cur
-
-                if no_progress >= 3:
-                    self.progress.emit("Reached bottom, stitching done")
+                y, conf = locate_frame(canvas, cur, y_hint)
+                if y is None:
+                    self.progress.emit(t("scroll_unmatched"))
+                    if not self.manual:
+                        # Stop at the last continuous image: never advance the
+                        # reference across a gap or keep scrolling farther away.
+                        break
+                    continue
+                y = refine_frame_offset(canvas, cur, y)
+                old_h = canvas.shape[0]
+                canvas, y_hint = stitch_frame(canvas, cur, y)
+                stationary = stationary+1 if canvas.shape[0] == old_h else 0
+                if canvas.shape[0] > self.max_height:
+                    if y < 0:
+                        canvas = canvas[-self.max_height:]
+                    else:
+                        canvas = canvas[:self.max_height]
+                self._preview(canvas)
+                self.progress.emit(f"{canvas.shape[0]} px · Esc " + t("hud_stop"))
+                if canvas.shape[0] >= self.max_height:
                     break
-                if accumulated.shape[0] >= self.max_height:
-                    self.progress.emit("Max length reached, stopping")
+                if not self.manual and stationary >= 3:
                     break
-
-            self.finished_img.emit(accumulated)
-        except Exception as exc:                      # noqa: BLE001
+        except Exception as exc:
             self.progress.emit(f"Error: {exc}")
-            self.finished_img.emit(None)
+        finally:
+            self.finished_img.emit(canvas)
 
 
 # --------------------------------------------------------------------------- #
@@ -1281,23 +1319,27 @@ class ScrollHud(QtWidgets.QWidget):
         self._place()
 
     def _place(self):
-        vg = QtWidgets.QApplication.primaryScreen().virtualGeometry()
-        region = self._region
+        screens = QtWidgets.QApplication.screens()
+        r = self._region
         bw, bh = self.width(), self.height()
-        if region.bottom() + 8 + bh <= vg.bottom():
-            x, y = region.left(), region.bottom() + 8
-        elif region.top() - 8 - bh >= vg.top():
-            x, y = region.left(), region.top() - 8 - bh
-        elif region.right() + 8 + bw <= vg.right():
-            x, y = region.right() + 8, region.top()
-        else:
-            x, y = vg.left() + 8, vg.top() + 8
-        self.move(int(x), int(y))
+        self._can_show = False
+        for screen in screens:
+            vg = screen.geometry()
+            candidates = ((r.left(), r.bottom()+12), (r.left(), r.top()-12-bh),
+                          (r.right()+12, r.top()), (r.left()-12-bw, r.top()))
+            for x, y in candidates:
+                x = max(vg.left(), min(x, vg.right()-bw+1))
+                y = max(vg.top(), min(y, vg.bottom()-bh+1))
+                rect = QRect(x, y, bw, bh)
+                if vg.contains(rect) and not rect.intersects(r):
+                    self.move(x, y)
+                    self._can_show = True
+                    return
 
     def show_on_top(self):
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        if self._can_show:
+            self.show()
+            self.raise_()
 
     def set_image(self, payload):
         """Show the latest stitched result, letterboxed into the thumbnail.
@@ -1308,8 +1350,8 @@ class ScrollHud(QtWidgets.QWidget):
         try:
             bgr, h = payload if isinstance(payload, tuple) else (payload, payload.shape[0])
             w = bgr.shape[1]
-            scale = min(self.THUMB_W / w, self.THUMB_H / h, 1.0)
-            rgb = cv2.resize(bgr, (max(1, int(w * scale)), max(1, int(h * scale))))
+            scale = min(self.THUMB_W / w, self.THUMB_H / bgr.shape[0], 1.0)
+            rgb = cv2.resize(bgr, (max(1, int(w * scale)), max(1, int(bgr.shape[0] * scale))))
             pm = QtGui.QPixmap.fromImage(bgr_to_qimage(rgb))
             self.thumb.setPixmap(pm)
             self._h = h
@@ -2076,6 +2118,8 @@ class OCRWorker(QThread):
 
 
 class MainWindow(QtWidgets.QWidget):
+    scroll_stop_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         # Background/tray apps are often not the "active" window (GNOME refuses
@@ -2144,6 +2188,12 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_textgrab = self._tbtn("textgrab", "")
         self.btn_window = self._tbtn("window", "")
         self.btn_scroll = self._tbtn("scroll", "")
+        self._scroll_direction = 1
+        self._scroll_menu = QtWidgets.QMenu(self.btn_scroll)
+        self._scroll_down_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(1))
+        self._scroll_up_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(-1))
+        self.btn_scroll.setMenu(self._scroll_menu)
+        self.btn_scroll.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         self.btn_manual = self._tbtn("manual", "")
         self.btn_record = self._tbtn("record", "")
         top.addWidget(self._toolbar_group((self.btn_single, self.btn_textgrab,
@@ -2296,7 +2346,7 @@ class MainWindow(QtWidgets.QWidget):
 
         # ---------- Connections ---------- #
         self.btn_manual.clicked.connect(lambda: self.start_select("manual"))
-        self.btn_scroll.clicked.connect(lambda: self.start_select("scroll"))
+        self.btn_scroll.clicked.connect(lambda: self._start_auto_scroll(1))
         self.btn_single.clicked.connect(lambda: self.start_select("single"))
         self.btn_textgrab.clicked.connect(lambda: self.start_select("textgrab"))
         self.btn_ocr.clicked.connect(lambda: self.run_ocr())
@@ -2347,6 +2397,8 @@ class MainWindow(QtWidgets.QWidget):
             b.setToolTip(t("a_" + name))
         self._lab_delay.setText(t("lab_delay"))
         self._lab_speed.setText(t("lab_speed"))
+        self._scroll_down_action.setText(t("scroll_down"))
+        self._scroll_up_action.setText(t("scroll_up"))
         self._output_label.setText(t("lab_output"))
         self.lwidth.setToolTip(t("lab_width"))
         self._ocr_lab_lang.setText(t("ocr_lang"))
@@ -2423,7 +2475,7 @@ class MainWindow(QtWidgets.QWidget):
         QToolButton#primaryCapture:hover {{ border-color:{on_accent}; }}
         QToolButton::menu-button {{ border:none; width:12px; border-top-right-radius:9px;
             border-bottom-right-radius:9px; }}
-        QToolButton::menu-arrow {{ width:0; height:0; image:none; }}
+
 
         /* normal buttons (dialogs etc.) */
         QPushButton {{
@@ -2540,6 +2592,9 @@ class MainWindow(QtWidgets.QWidget):
             self._bring_to_front()
 
     def start_select(self, mode):
+        if self.worker is not None and self.worker.isRunning():
+            self.status.setText("Stop the current scrolling capture with Esc first")
+            return
         self._mode = mode
         self.showMinimized()
         QtCore.QTimer.singleShot(250, self._show_selector)
@@ -2711,95 +2766,115 @@ class MainWindow(QtWidgets.QWidget):
         self._restore()
         self.status.setText(f"Picked {hexv}  rgb{rgb}, copied to clipboard")
 
+    def _start_auto_scroll(self, direction):
+        self._scroll_direction = direction
+        self.start_select("scroll")
+
     def _scroll_shot(self, phys, dpr, gr=None):
-        self.status.setText("Scrolling capture… please don't move the mouse")
-        if gr is not None:
-            self._scroll_overlay = ScrollRegionOverlay(gr)
-        self._scroll_hud = ScrollHud(gr or QRect(*phys), self._auto_scroll_stop, mode="auto")
+        self._start_scroll_worker(phys, gr or QRect(*phys), dpr, manual=False)
+
+    def _start_scroll_worker(self, phys, gr, dpr, manual):
+        if self.worker is not None and self.worker.isRunning():
+            return
+        self.status.setText(t("hud_manual" if manual else "hud_auto") + " · Esc")
+        self._scroll_overlay = ScrollRegionOverlay(gr)
+        self._scroll_hud = ScrollHud(gr, self._auto_scroll_stop,
+                                     mode="manual" if manual else "auto")
         self._scroll_hud.show_on_top()
-        self.worker = CaptureWorker(phys, scroll_clicks=self.speed.value())
+        self.worker = CaptureWorker(phys, scroll_clicks=self.speed.value(),
+                                    manual=manual, direction=self._scroll_direction)
         self.worker.dpr = dpr
-        self.worker.progress.connect(self.status.setText)
+        self.worker.hide_ui_for_grab = True
+        self.worker.preparing_grab.connect(self._prepare_scroll_grab)
+        self.worker.grabbed.connect(self._show_scroll_controls)
+        self.worker.progress.connect(self._scroll_progress)
         self.worker.frame.connect(self._scroll_hud.set_image)
         self.worker.finished_img.connect(self._on_capture_done)
+        self._scroll_message = ""
+        try:
+            self.scroll_stop_requested.disconnect(self._auto_scroll_stop)
+        except TypeError:
+            pass
+        self.scroll_stop_requested.connect(self._auto_scroll_stop)
+        self._scroll_keys = KeyListener(on_press=self._scroll_key_pressed)
+        try:
+            self._scroll_keys.start()
+            self._scroll_keys.wait()
+        except Exception as exc:
+            self._close_scroll_hud()
+            self.status.setText(f"Cannot start capture stop key: {exc}")
+            self._restore()
+            return
         self.worker.start()
 
+    def _scroll_key_pressed(self, key):
+        if key == Key.esc:
+            self.scroll_stop_requested.emit()
+
+    def _prepare_scroll_grab(self):
+        worker = self.worker
+        if worker is None or worker._abort:
+            return
+        if self._scroll_hud is not None:
+            self._scroll_hud.hide()
+        if self._scroll_overlay is not None:
+            for window in self._scroll_overlay._wins:
+                window.hide()
+        # Let the compositor remove both the windows and their shadows before
+        # the background thread reads the framebuffer.
+        QtCore.QTimer.singleShot(100, worker.grab_ready.set)
+
+    def _show_scroll_controls(self):
+        if self.worker is None or self.worker._abort:
+            return
+        if self._scroll_overlay is not None:
+            for window in self._scroll_overlay._wins:
+                window.show()
+        if self._scroll_hud is not None:
+            self._scroll_hud.show_on_top()
+
+    def _scroll_progress(self, message):
+        self._scroll_message = message
+        self.status.setText(message)
+        if self._scroll_hud is not None:
+            self._scroll_hud.lbl.setText(message)
+
     def _close_scroll_hud(self):
+        listener = getattr(self, "_scroll_keys", None)
+        if listener is not None:
+            if listener.running:
+                try:
+                    listener.stop()
+                except ConnectionClosedError:
+                    pass  # The listener may already have closed its XRecord connection.
+            self._scroll_keys = None
         for attr in ("_scroll_hud", "_scroll_overlay"):
-            w = getattr(self, attr, None)
-            if w is not None:
-                w.close()
-                w.deleteLater()
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                widget.close()
+                widget.deleteLater()
             setattr(self, attr, None)
 
     def _auto_scroll_stop(self):
-        """HUD stop button: abort the worker; it emits the partial stitched image."""
         if self.worker is not None:
             self.worker.abort()
 
     def _on_capture_done(self, img):
         self._close_scroll_hud()
+        message = getattr(self, "_scroll_message", "")
         if img is None:
-            self.status.setText("Capture failed, see the message above")
+            self.status.setText(message or "Capture cancelled")
             self._restore()
         else:
-            self._present_capture(img, f"Long capture done: {img.shape[1]}×{img.shape[0]} px")
+            self._present_capture(img, f"Long capture: {img.shape[1]}×{img.shape[0]} px")
+            if message == t("scroll_unmatched") or message.startswith("Error:"):
+                self.status.setText(message)
 
-    # --- manual scrolling capture (PixPin-style global canvas) --- #
     def _manual_start(self, phys, gr):
-        try:
-            self._m_phys = phys
-            self._m_acc = grab_region(*phys)
-            self._m_y = 0                          # last located frame top on canvas
-            self._scroll_overlay = ScrollRegionOverlay(gr)
-            self._scroll_hud = ScrollHud(gr, self._manual_stop, mode="manual")
-            self._scroll_hud.show_on_top()
-            self._scroll_hud.set_image(self._m_acc)
-            self._m_timer = QtCore.QTimer(self)
-            self._m_timer.setInterval(250)          # grab a frame every 250 ms
-            self._m_timer.timeout.connect(self._manual_tick)
-            self._m_timer.start()
-        except Exception as exc:                    # noqa: BLE001
-            self._close_scroll_hud()
-            self._restore()
-            QtWidgets.QMessageBox.critical(self, "Manual capture failed to start", str(exc))
-
-    MANUAL_MAX_H = 40000        # max manual long-image height, to avoid runaway memory growth
-
-    def _manual_tick(self):
-        """Locate every frame on the global canvas instead of blindly appending.
-
-        The old prev-frame comparison assumed content only ever appears below,
-        so scrolling up and back down stitched the same area in twice. A frame
-        whose position is already on the canvas contributes nothing; only rows
-        outside the canvas (below, or above when scrolled back past the start)
-        extend it — which also means frames are idempotent, and fast scrolls
-        that fail to locate are skipped rather than duplicated.
-        """
-        cur = grab_region(*self._m_phys)
-        y, conf = locate_frame(self._m_acc, cur, y_hint=self._m_y)
-        if y is not None:
-            y = refine_frame_offset(self._m_acc, cur, y)
-            self._m_acc, self._m_y = stitch_frame(self._m_acc, cur, y)
-        if self._scroll_hud is not None:
-            if self._m_acc.shape[0] > 1200:         # keep the letterbox resize cheap
-                s = 1200.0 / self._m_acc.shape[0]
-                small = cv2.resize(self._m_acc,
-                                   (max(1, int(self._m_acc.shape[1] * s)), 1200))
-            else:
-                small = self._m_acc
-            self._scroll_hud.set_image(small)
-        if self._m_acc.shape[0] >= self.MANUAL_MAX_H:
-            self.status.setText("Max length reached, stitching stopped automatically")
-            self._manual_stop()
+        self._start_scroll_worker(phys, gr, 1.0, manual=True)
 
     def _manual_stop(self):
-        if getattr(self, "_m_timer", None):
-            self._m_timer.stop()
-        self._close_scroll_hud()
-        self._present_capture(
-            self._m_acc,
-            f"Manual capture done: {self._m_acc.shape[1]}×{self._m_acc.shape[0]} px")
+        self._auto_scroll_stop()
 
     # --- after capture: copy to clipboard by default + bottom-left floating thumbnail --- #
     def _present_capture(self, img, status):
@@ -2827,18 +2902,6 @@ class MainWindow(QtWidgets.QWidget):
         del self.history[30:]                # keep at most 30
 
     # --- system-clipboard image history: source for Ctrl+1 / Ctrl+2 pin ---- #
-    @staticmethod
-    def _clip_fingerprint(qimg):
-        """Cheap content fingerprint (size + corner pixels + a 4 KB sample) — no full-image hash."""
-        digest = hashlib.sha1()
-        digest.update(b"%dx%d" % (qimg.width(), qimg.height()))
-        for x, y in ((0, 0), (qimg.width() - 1, 0), (0, qimg.height() - 1),
-                     (qimg.width() - 1, qimg.height() - 1)):
-            c = qimg.pixelColor(x, y)
-            digest.update(b"%d,%d,%d," % (c.red(), c.green(), c.blue()))
-        digest.update(qimg.constBits().asstring(qimg.sizeInBytes())[:4096])
-        return digest.hexdigest()
-
     def _on_clipboard_changed(self):
         """Track images copied from ANY app; newest first, capped at 10. Skips our own writes."""
         mime = QtWidgets.QApplication.clipboard().mimeData()
@@ -2847,8 +2910,7 @@ class MainWindow(QtWidgets.QWidget):
         qimg = QtGui.QImage(mime.imageData())
         if qimg.isNull():
             return
-        fp = self._clip_fingerprint(qimg)
-        if self._clip_images and self._clip_fingerprint(self._clip_images[0]) == fp:
+        if self._clip_images and self._clip_images[0] == qimg:
             return                               # same image re-signalled, not a new copy
         self._clip_images.insert(0, qimg)
         del self._clip_images[10:]               # keep at most 10
@@ -3177,8 +3239,7 @@ class MainWindow(QtWidgets.QWidget):
         if flat is not None and flat.save(path):
             self.status.setText(("Saved: " if _LANG == "en" else "已保存:") + path)
         else:
-            cv2.imwrite(path, self.image_bgr)
-            self.status.setText(("Saved: " if _LANG == "en" else "已保存:") + path)
+            self.status.setText(("Save failed: " if _LANG == "en" else "保存失败:") + path)
 
     # ===================== P4: tray / settings / history ===================== #
     def _setup_tray(self):
@@ -3211,6 +3272,10 @@ class MainWindow(QtWidgets.QWidget):
         self.tray.setToolTip(f"{t('app_name')} — {t('app_comment')}")
 
     def quit_app(self):
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.abort()
+            self.worker.wait()
+        self._close_scroll_hud()
         if self._recorder is not None:
             self._on_record_stop()
         for worker in self._ocr_workers:

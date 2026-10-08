@@ -147,6 +147,9 @@ separate upstream package and does not use this script. The installer also regis
 
 ## 💡 Tips for scrolling capture
 
+- The auto-capture button dropdown offers upward or downward scrolling. Manual mode supports scrolling both ways without appending already captured content. Press **Esc** to stop.
+- Borders and controls briefly hide for each grab to exclude their shadows. If no room exists outside the selection, the panel stays hidden; Esc still works. Unreliable alignment is reported: auto mode stops with the continuous partial image; in manual mode, return to captured content.
+
 - Select a **scrollable target window** (browser, chat, document). When capture starts,
   Kapture moves the cursor to the center of the selected area and sends scroll-wheel events —
   **don't move the mouse** after it begins.
