@@ -14,6 +14,7 @@ Dependencies (system, install via apt): tesseract-ocr (+ language packs), ffmpeg
 
 import sys
 import time
+import hashlib
 
 import cv2
 import numpy as np
@@ -131,6 +132,10 @@ TR = {
     "cap_record": {"zh": "录屏", "en": "Record screen"},
     "cap_color": {"zh": "屏幕取色器", "en": "Screen color picker"},
     "cap_repeat": {"zh": "重复上次区域", "en": "Repeat last area"},
+    "cap_pin1": {"zh": "钉到屏幕：当前剪贴板图", "en": "Pin current clipboard image"},
+    "cap_pin2": {"zh": "钉到屏幕：上一张剪贴板图", "en": "Pin previous clipboard image"},
+    "st_no_clip_img": {"zh": "剪贴板历史里没有图片", "en": "No image in clipboard history"},
+    "st_pinned_clip": {"zh": "已钉住剪贴板图片", "en": "Pinned clipboard image"},
     "t_history": {"zh": "历史截图", "en": "History"},
     "t_settings": {"zh": "设置", "en": "Settings"},
     "lab_delay": {"zh": "延时", "en": "Delay"},
@@ -426,7 +431,14 @@ SHORTCUT_ACTIONS = [
     ("Repeat last area", "--repeat"),
     ("Show main window", "--show"),
     ("Open settings", "--settings"),
+    ("Pin current clipboard image", "--pin1"),
+    ("Pin previous clipboard image", "--pin2"),
 ]
+
+# Actions whose shortcut is pre-filled and auto-registered on first run so the
+# pin-to-clipboard feature works out of the box (PixPin-style). Values are Qt
+# PortableText; verified to round-trip to a live GNOME keysym (<Control>1 -> 49).
+DEFAULT_KEYS = {"--pin1": "Ctrl+1", "--pin2": "Ctrl+2"}
 
 
 GNOME_MEDIA_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
@@ -445,6 +457,26 @@ def shortcut_backend():
     return None
 
 
+# GTK parses a custom-keybinding accelerator by keysym name, not by the literal
+# character: "<Alt>`" resolves to keysym 0 (dead shortcut) while "<Alt>grave" works.
+# Single letters/digits parse fine, so only punctuation needs the X keysym name.
+GNOME_KEYSYM_NAMES = {
+    "`": "grave", "~": "asciitilde", "!": "exclam", "@": "at", "#": "numbersign",
+    "$": "dollar", "%": "percent", "^": "asciicircum", "&": "ampersand",
+    "*": "asterisk", "(": "parenleft", ")": "parenright", "-": "minus",
+    "_": "underscore", "=": "equal", "+": "plus", "[": "bracketleft",
+    "]": "bracketright", "{": "braceleft", "}": "braceright", "\\": "backslash",
+    "|": "bar", ";": "semicolon", ":": "colon", "'": "apostrophe",
+    '"': "quotedbl", ",": "comma", ".": "period", "/": "slash",
+    "<": "less", ">": "greater", "?": "question",
+}
+
+GNOME_SPECIAL_NAMES = {  # Qt PortableText -> GNOME keysym name for non-punctuation keys
+    "Esc": "Escape", "Del": "Delete", "Ins": "Insert",
+    "PgUp": "Page_Up", "PgDown": "Page_Down", "Space": "space",
+}
+
+
 def gnome_accelerator(sequence):
     """Convert a single Qt key combination to GNOME's accelerator notation."""
     if sequence.count() != 1:
@@ -459,11 +491,14 @@ def gnome_accelerator(sequence):
         if combo & int(bit):
             prefix += f"<{name}>"
     key = QtGui.QKeySequence(combo & ~mod_bits).toString(QtGui.QKeySequence.PortableText)
-    key = {"Esc": "Escape", "Del": "Delete", "Ins": "Insert",
-           "PgUp": "Page_Up", "PgDown": "Page_Down", "Space": "space",
-           "+": "plus", "-": "minus"}.get(key, key)
+    if key in GNOME_SPECIAL_NAMES:
+        key = GNOME_SPECIAL_NAMES[key]
+    elif len(key) == 1:
+        # GTK only accepts the keysym name for punctuation; letters/digits pass through.
+        key = GNOME_KEYSYM_NAMES.get(key, key)
     if not key or (not prefix and len(key) == 1):
         raise ValueError("modifier or special key required")
+    # Single letters/digits must stay lower-case; keysym names are used verbatim.
     return prefix + (key.lower() if len(key) == 1 else key)
 
 
@@ -477,6 +512,9 @@ def gnome_key_sequence(accelerator):
     key = {"Escape": "Esc", "Delete": "Del", "Insert": "Ins",
            "Page_Up": "PgUp", "Page_Down": "PgDown",
            "space": "Space", "plus": "+", "minus": "-"}.get(key, key)
+    # Reverse of gnome_accelerator: a punctuation keysym name must become the literal
+    # character again, or QKeySequence parses it as nothing and the row shows empty.
+    key = {v: k for k, v in GNOME_KEYSYM_NAMES.items()}.get(key, key)
     return QtGui.QKeySequence("+".join([*(mapped.get(mod, mod) for mod in mods), key]))
 
 
@@ -501,17 +539,31 @@ def _gnome_paths():
 
 
 def gnome_current_key(flag):
+    """Return the stored binding for one action.
+
+    Read the subpath directly instead of only when it appears in the master
+    custom-keybindings array: an action can be unregistered from that array
+    (GNOME then ignores it) while its binding is still stored, and showing it as
+    empty invited a save that deleted the binding for good.
+    """
     import ast
     path = _gnome_path(flag)
-    if path not in _gnome_paths():
-        return ""
     return ast.literal_eval(_gsettings("get", f"{GNOME_CUSTOM_SCHEMA}:{path}", "binding"))
 
 
 def gnome_set_shortcuts(entries):
-    """Update only Kapture's GNOME shortcuts; preserve unrelated custom shortcuts."""
+    """Update only Kapture's GNOME shortcuts; preserve unrelated custom shortcuts.
+
+    Entries are ``(name, flag, command, key)`` or ``(name, flag, command, key,
+    explicit_clear)``. An empty key keeps a stored binding and re-registers it:
+    a blank row in the dialog is usually the action never having been bound, not
+    the user asking to unbind it. Only ``explicit_clear`` (the row's ✕ button)
+    drops the path and deletes the stored binding.
+    """
     paths = _gnome_paths()
-    for name, flag, command, key in entries:
+    for entry in entries:
+        name, flag, command, key = entry[:4]
+        explicit_clear = entry[4] if len(entry) > 4 else False
         path = _gnome_path(flag)
         schema = f"{GNOME_CUSTOM_SCHEMA}:{path}"
         if key:
@@ -520,8 +572,17 @@ def gnome_set_shortcuts(entries):
             _gsettings("set", schema, "binding", repr(key))
             if path not in paths:
                 paths.append(path)
-        elif path in paths:
-            paths.remove(path)
+        elif explicit_clear:
+            if path in paths:
+                paths.remove(path)
+            for key_name in ("name", "command", "binding"):
+                try:
+                    _gsettings("reset", schema, key_name)
+                except RuntimeError:
+                    pass      # nothing stored for this action
+        elif _gsettings("get", schema, "binding") != "''":
+            if path not in paths:
+                paths.append(path)     # keep the binding and make GNOME honour it
     _gsettings("set", GNOME_MEDIA_SCHEMA, "custom-keybindings", repr(paths))
 
 
@@ -785,7 +846,7 @@ class RegionSelector(QtWidgets.QWidget):
     loupe next to the cursor showing pixel-level zoom, coordinates and hex color; region mode also
     shows the selection size.
     """
-    selected = pyqtSignal(QRect)
+    selected = pyqtSignal(QRect, object)   # global selection rect + BGR numpy crop of the frozen frame
     colorPicked = pyqtSignal(object)        # emits a QColor
     cancelled = pyqtSignal()
 
@@ -795,9 +856,15 @@ class RegionSelector(QtWidgets.QWidget):
     def __init__(self, mode="region"):
         super().__init__()
         self.mode = mode
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # Bypass the window manager (like ManualBar/RecordBar/WindowPicker) so the
+        # overlay covers the whole virtual desktop including the GNOME top bar and
+        # dock; a WM-managed Qt.Tool window is clamped to the work area, which offset
+        # the selection from the frozen full-geometry frame.
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
+                            Qt.X11BypassWindowManagerHint)
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         scr = QtWidgets.QApplication.primaryScreen()
         self.dpr = scr.devicePixelRatio()
@@ -819,6 +886,19 @@ class RegionSelector(QtWidgets.QWidget):
 
         self.origin = None
         self.cur = QtCore.QPoint(0, 0)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # A WM-bypassed window is not given keyboard focus by the window manager,
+        # so grab the keyboard explicitly to keep Esc working.
+        self.activateWindow()
+        self.raise_()
+        self.setFocus(Qt.OtherFocusReason)
+        self.grabKeyboard()
+
+    def closeEvent(self, e):
+        self.releaseKeyboard()   # no-op if we never grabbed it
+        super().closeEvent(e)
 
     # Get the pixel color of the background at a given logical coordinate
     def _pixel(self, lp):
@@ -908,9 +988,21 @@ class RegionSelector(QtWidgets.QWidget):
         gr = QRect(self.mapToGlobal(r.topLeft()), r.size())
         self.close()
         if gr.width() > 8 and gr.height() > 8:
-            self.selected.emit(gr)
+            self.selected.emit(gr, self._crop_frozen(r))
         else:
             self.cancelled.emit()
+
+    def _crop_frozen(self, r):
+        """Crop the selection from the frozen background frame (BGR numpy), so the result
+        is exactly what the user saw: no top bar/dock can reappear in a later re-grab."""
+        x = max(0, int(r.x() * self.dpr))
+        y = max(0, int(r.y() * self.dpr))
+        w = max(1, min(int(r.width() * self.dpr), self.bg_img.width() - x))
+        h = max(1, min(int(r.height() * self.dpr), self.bg_img.height() - y))
+        crop = self.bg_img.copy(x, y, w, h).convertToFormat(QtGui.QImage.Format_RGB32)
+        arr = np.frombuffer(crop.constBits().asstring(crop.sizeInBytes()),
+                            dtype=np.uint8).reshape(h, crop.bytesPerLine() // 4, 4)
+        return np.ascontiguousarray(arr[:, :w, :3])   # BGRA -> BGR (drop alpha)
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
@@ -1390,6 +1482,7 @@ class PinnedImage(QtWidgets.QWidget):
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setCursor(Qt.OpenHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)      # so Esc reaches this frameless Tool window
         # Initial size: no more than 60% of the screen
         sg = QtWidgets.QApplication.primaryScreen().availableGeometry()
         maxw, maxh = int(sg.width() * 0.6), int(sg.height() * 0.6)
@@ -1404,6 +1497,17 @@ class PinnedImage(QtWidgets.QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+        self.setFocus()                          # grab keyboard so Esc closes the pin
+
+    def focusInEvent(self, e):
+        super().focusInEvent(e)
+        self.setFocus()                          # re-grab after a click on the child label
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(e)
 
     def _apply(self):
         pix = self._orig.scaled(
@@ -1617,6 +1721,8 @@ class MainWindow(QtWidgets.QWidget):
         set_lang(self.settings.value("ui_lang", "zh"))      # apply the UI language
         write_desktop_entry()                               # launcher name follows the language
         self.history = []            # recent screenshots [(QImage, description)]
+        self._clip_images = []       # system-clipboard image history, newest first (max 10)
+        QtWidgets.QApplication.clipboard().dataChanged.connect(self._on_clipboard_changed)
         self._recorder = None        # screen recorder
         self._ocr_workers = []
         self._ocr_serial = 0
@@ -1984,6 +2090,23 @@ class MainWindow(QtWidgets.QWidget):
             app.setPalette(pal)
         self._refresh_theme_icons(theme)
 
+    def _bring_to_front(self):
+        """Restore and foreground the window even when launched from the tray/background.
+
+        A tray or shortcut activation carries no user-input timestamp, so GNOME's
+        focus-stealing prevention rejects the plain activateWindow()/raise_() and the
+        window stays Iconic behind the current window. Clearing the minimized flag and
+        re-raising after the event loop settles restores it reliably on X11 and KDE.
+        """
+        if self.isMinimized():
+            self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        # Re-assert on the next event-loop turn: some compositors only honour the
+        # request once the restore has been processed.
+        QtCore.QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
+
     def handle_command(self, cmd):
         """Single-instance command dispatch: sent from this process or a later-launched process."""
         if cmd == "background":
@@ -1998,13 +2121,14 @@ class MainWindow(QtWidgets.QWidget):
             self.toggle_record()
         elif cmd == "repeat":
             self.repeat_last()
+        elif cmd in ("pin1", "pin2"):
+            self._pin_from_clipboard(0 if cmd == "pin1" else 1)
         elif cmd == "settings":
+            self._bring_to_front()          # give the modal dialog a visible, active parent
             self.show_settings()
         else:                                   # show / show-first
             self._blank_editor()                 # don't show the previous screenshot on open
-            self.showNormal()
-            self.activateWindow()
-            self.raise_()
+            self._bring_to_front()
 
     def start_select(self, mode):
         self._mode = mode
@@ -2023,22 +2147,24 @@ class MainWindow(QtWidgets.QWidget):
         self.showNormal()
         self.activateWindow()
 
-    def _on_region(self, gr: QRect):
+    def _on_region(self, gr: QRect, frozen=None):
         dpr = QtWidgets.QApplication.primaryScreen().devicePixelRatio()
         phys = (int(gr.left() * dpr), int(gr.top() * dpr),
                 int(gr.width() * dpr), int(gr.height() * dpr))
         if self._mode == "single":
-            QtCore.QTimer.singleShot(150, lambda: self._single_shot(phys))
+            QtCore.QTimer.singleShot(150, lambda: self._single_shot(phys, frozen))
         elif self._mode == "manual":
             QtCore.QTimer.singleShot(150, lambda: self._manual_start(phys, gr))
         else:
             QtCore.QTimer.singleShot(150, lambda: self._scroll_shot(phys, dpr))
 
-    def _single_shot(self, phys):
+    def _single_shot(self, phys, frozen=None):
         self._last_phys = phys              # remember it for "repeat last area"
+        # Prefer the frozen-frame crop the user actually saw; only fall back to a live
+        # re-grab (e.g. "repeat last area") where no overlay was on screen.
+        grab = (lambda: frozen) if frozen is not None else (lambda: grab_region(*phys))
         self._grab_with_delay(
-            lambda: self._present_capture(
-                grab_region(*phys), f"Region captured: {phys[2]}×{phys[3]} px"))
+            lambda: self._present_capture(grab(), f"Region captured: {phys[2]}×{phys[3]} px"))
 
     # --- delay countdown --- #
     def _grab_with_delay(self, grab_fn):
@@ -2190,10 +2316,12 @@ class MainWindow(QtWidgets.QWidget):
         if self.settings.value("auto_save", False, type=bool):
             self._auto_save(img)
         self.status.setText(status + ("  " + t("st_copied") if copied else ""))
-        # Auto OCR needs the captured image in the editor to display its result.
+        # Auto OCR needs the captured image in the editor to display its result, but it
+        # does not have to be on screen: show the window only when open_editor is on.
         auto_ocr = self.settings.value("auto_ocr", True, type=bool)
-        if auto_ocr or self.settings.value("open_editor", False, type=bool):
-            self._load_into_editor(img)
+        show = self.settings.value("open_editor", False, type=bool)
+        if auto_ocr or show:
+            self._load_into_editor(img, show=show)
         self._show_thumbnail(img)
         if auto_ocr:
             QtCore.QTimer.singleShot(0, lambda captured=img: self._auto_ocr_for(captured))
@@ -2201,6 +2329,55 @@ class MainWindow(QtWidgets.QWidget):
     def _add_history(self, qimg, desc):
         self.history.insert(0, (qimg, desc))
         del self.history[30:]                # keep at most 30
+
+    # --- system-clipboard image history: source for Ctrl+1 / Ctrl+2 pin ---- #
+    @staticmethod
+    def _clip_fingerprint(qimg):
+        """Cheap content fingerprint (size + corner pixels + a 4 KB sample) — no full-image hash."""
+        digest = hashlib.sha1()
+        digest.update(b"%dx%d" % (qimg.width(), qimg.height()))
+        for x, y in ((0, 0), (qimg.width() - 1, 0), (0, qimg.height() - 1),
+                     (qimg.width() - 1, qimg.height() - 1)):
+            c = qimg.pixelColor(x, y)
+            digest.update(b"%d,%d,%d," % (c.red(), c.green(), c.blue()))
+        digest.update(qimg.constBits().asstring(qimg.sizeInBytes())[:4096])
+        return digest.hexdigest()
+
+    def _on_clipboard_changed(self):
+        """Track images copied from ANY app; newest first, capped at 10. Skips our own writes."""
+        mime = QtWidgets.QApplication.clipboard().mimeData()
+        if not mime.hasImage():
+            return
+        qimg = QtGui.QImage(mime.imageData())
+        if qimg.isNull():
+            return
+        fp = self._clip_fingerprint(qimg)
+        if self._clip_images and self._clip_fingerprint(self._clip_images[0]) == fp:
+            return                               # same image re-signalled, not a new copy
+        self._clip_images.insert(0, qimg)
+        del self._clip_images[10:]               # keep at most 10
+
+    def _pin_from_clipboard(self, index):
+        """Pin clipboard-history image at index (0 = current, 1 = previous). No-op if missing."""
+        if index >= len(self._clip_images):
+            self.status.setText(t("st_no_clip_img"))
+            return
+        PinnedImage(self._clip_images[index])
+        self.status.setText(t("st_pinned_clip"))
+
+    def _ensure_default_shortcuts(self):
+        """On GNOME, register DEFAULT_KEYS once so pin-to-clipboard works out of the box.
+        Skips actions already bound (never overwrites a user's own choice)."""
+        if shortcut_backend() != "gnome":
+            return
+        run_sh = _run_sh_path()
+        entries = []
+        for name, flag in SHORTCUT_ACTIONS:
+            if flag in DEFAULT_KEYS and not gnome_current_key(flag):
+                entries.append((name, flag, f"{run_sh} {flag}",
+                                gnome_accelerator(QtGui.QKeySequence(DEFAULT_KEYS[flag]))))
+        if entries:
+            gnome_set_shortcuts(entries)
 
     def _auto_save(self, img):
         import os
@@ -2245,14 +2422,16 @@ class MainWindow(QtWidgets.QWidget):
             cv2.imwrite(path, img)
             self.status.setText(("Saved: " if _LANG == "en" else "已保存:") + path)
 
-    def _load_into_editor(self, img):
-        """Load the given screenshot into the editor and show it (thumbnail / history / open_editor setting)."""
+    def _load_into_editor(self, img, show=True):
+        """Load the given screenshot into the editor. With show=False it loads silently
+        (auto-OCR works on it) and the window only appears when the user opens it."""
         self._ocr_serial += 1
         self.image_bgr = img
-        self.showNormal()
-        self._show_preview()
-        self.activateWindow()
-        self.raise_()
+        if show:
+            self.showNormal()
+            self._show_preview()
+            self.activateWindow()
+            self.raise_()
 
     def _blank_editor(self):
         """Reset the editor to a blank state (so opening the main window doesn't show the last screenshot)."""
@@ -2455,6 +2634,7 @@ class MainWindow(QtWidgets.QWidget):
         kf.addRow(QtWidgets.QLabel(t("set_sc_hint")))
         run_sh = _run_sh_path()
         key_edits = {}
+        cleared = set()      # rows whose ✕ was clicked: the only way to unbind
         for name, flag in SHORTCUT_ACTIONS:
             cmd_url = f"{run_sh} {flag}"
             kse = QtWidgets.QKeySequenceEdit()
@@ -2463,8 +2643,12 @@ class MainWindow(QtWidgets.QWidget):
             if cur:
                 kse.setKeySequence(gnome_key_sequence(cur) if backend == "gnome"
                                    else QtGui.QKeySequence(cur))
+            elif flag in DEFAULT_KEYS:
+                # Pre-fill the advertised default even before it is registered, so the
+                # pin-to-clipboard shortcuts are visible out of the box.
+                kse.setKeySequence(QtGui.QKeySequence(DEFAULT_KEYS[flag]))
             clr = QtWidgets.QToolButton(); clr.setText("✕")
-            clr.clicked.connect(lambda _, e=kse: e.clear())
+            clr.clicked.connect(lambda _, e=kse, f=flag: (e.clear(), cleared.add(f)))
             row = QtWidgets.QHBoxLayout(); row.addWidget(kse); row.addWidget(clr)
             rw = QtWidgets.QWidget(); rw.setLayout(row)
             kf.addRow(self._action_label(flag), rw)
@@ -2564,8 +2748,10 @@ class MainWindow(QtWidgets.QWidget):
                             raise ValueError(t("set_sc_invalid"))
                 if backend == "gnome":
                     gnome_set_shortcuts([
-                        (name, flag, cmd_url, gnome_accelerator(kse.keySequence())
-                         if not kse.keySequence().isEmpty() else "")
+                        (name, flag, cmd_url,
+                         gnome_accelerator(kse.keySequence())
+                         if not kse.keySequence().isEmpty() else "",
+                         flag in cleared)
                         for flag, (kse, cmd_url, name) in key_edits.items()])
                 else:
                     kde_backup_khotkeys()
@@ -2707,7 +2893,7 @@ class MainWindow(QtWidgets.QWidget):
         self.selector.show()
         self.selector.activateWindow(); self.selector.raise_()
 
-    def _start_record(self, gr):
+    def _start_record(self, gr, frozen=None):
         import os
         dpr = QtWidgets.QApplication.primaryScreen().devicePixelRatio()
         phys = (int(gr.left() * dpr), int(gr.top() * dpr),
@@ -2765,6 +2951,8 @@ def main():
     parser.add_argument("--show", action="store_true", help="show the main window")
     parser.add_argument("--settings", action="store_true", help="open settings")
     parser.add_argument("--background", action="store_true", help="keep running with the main window hidden")
+    parser.add_argument("--pin1", action="store_true", help="pin the current clipboard image to screen")
+    parser.add_argument("--pin2", action="store_true", help="pin the previous clipboard image to screen")
     cli, _ = parser.parse_known_args()
     cmd = ("single" if cli.region else
            "manual" if cli.manual else
@@ -2773,6 +2961,8 @@ def main():
            "color" if cli.color else
            "record" if cli.record else
            "repeat" if cli.repeat else
+           "pin1" if cli.pin1 else
+           "pin2" if cli.pin2 else
            "settings" if cli.settings else
            "background" if cli.background else "show")
 
@@ -2813,6 +3003,13 @@ def main():
     sys.excepthook = _excepthook
 
     win = MainWindow()
+
+    # Register the default pin-to-clipboard shortcuts on GNOME (only the primary
+    # instance reaches here; subsequent launches forward a command and exit).
+    try:
+        win._ensure_default_shortcuts()
+    except (ValueError, OSError, RuntimeError):
+        pass                                       # never block startup on shortcut registration
 
     # Start a local server to receive commands from subsequent launches
     QLocalServer.removeServer(SERVER_NAME)           # clear any stale socket

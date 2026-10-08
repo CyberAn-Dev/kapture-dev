@@ -56,8 +56,36 @@ class ShortcutTest(unittest.TestCase):
             self.assertEqual(paths, [other, kapture._gnome_path("--region")])
             self.assertEqual(kapture.gnome_current_key("--region"), "<Control><Alt>k")
             kapture.gnome_set_shortcuts([
-                ("Region capture", "--region", command, "")])
+                ("Region capture", "--region", command, "", True)])   # explicit ✕
             self.assertEqual(kapture._gnome_paths(), [other])
+
+    def test_gnome_blank_save_keeps_and_reregisters_a_dropped_binding(self):
+        # Region shows blank when its path was dropped from the master array even
+        # though the binding is still stored. A plain save must keep and re-register
+        # it; only the ✕ button removes it. This was the "Alt+` died again" cycle.
+        with tempfile.TemporaryDirectory() as config_dir, mock.patch.dict(
+                os.environ, {"XDG_CONFIG_HOME": config_dir, "GSETTINGS_BACKEND": "keyfile"}):
+            command = "/opt/kapture/run.sh --region"
+            kapture.gnome_set_shortcuts([
+                ("Region capture", "--region", command, "<Alt>grave")])
+            # Simulate the binding being dropped from the master array (GNOME ignores
+            # it) while the subpath binding stays stored.
+            kapture._gsettings("set", kapture.GNOME_MEDIA_SCHEMA,
+                               "custom-keybindings", repr([]))
+            self.assertNotIn(kapture._gnome_path("--region"), kapture._gnome_paths())
+            self.assertEqual(kapture.gnome_current_key("--region"), "<Alt>grave")
+
+            # A save with the row blank (not ✕'d) must re-register it, not delete it.
+            kapture.gnome_set_shortcuts([
+                ("Region capture", "--region", command, "", False)])
+            self.assertIn(kapture._gnome_path("--region"), kapture._gnome_paths())
+            self.assertEqual(kapture.gnome_current_key("--region"), "<Alt>grave")
+
+            # The ✕ button is the only path that removes the path and the binding.
+            kapture.gnome_set_shortcuts([
+                ("Region capture", "--region", command, "", True)])
+            self.assertNotIn(kapture._gnome_path("--region"), kapture._gnome_paths())
+            self.assertEqual(kapture.gnome_current_key("--region"), "")
 
     def test_settings_show_shortcuts_on_gnome_and_save_background_start(self):
         def inspect(dialog):
