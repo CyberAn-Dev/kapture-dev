@@ -42,7 +42,19 @@
 - A blank shortcut row on save means "not bound", never "unbind": it keeps the stored binding and re-registers the path in the master array. Only the row's ✕ button (`explicit_clear`) removes the path and resets name/command/binding. Rationale: an action can vanish from the master `custom-keybindings` array while its binding stays stored; showing it as empty and then saving deleted it for good (the repeated Alt+\` failure).
 - `gnome_current_key()` reads the action subpath directly, not only when the path is listed in the master array, so stored-but-unregistered bindings still display and can be repaired by a plain save.
 - The region-selection overlay uses `X11BypassWindowManagerHint` rather than `Qt.Tool`, matching the other overlays, so it covers the top bar/dock and its geometry matches the frozen frame. Because bypassed windows receive no WM keyboard focus, the overlay grabs/releases the keyboard itself; Esc-cancel depends on this.
-- Live verification runs the repository `kapture.py` under `/opt/kapture/.venv/bin/python` (the repo has no `.venv` on this machine), leaving the root-owned `/opt/kapture/kapture.py` untouched and requiring no sudo.
+- Live verification runs the repository `kapture.py` through the repository `run.sh`, whose `.venv` symlink points at `/opt/kapture/.venv`, leaving the root-owned `/opt/kapture/kapture.py` untouched and requiring no sudo.
+
+## Screen text grab (toolbar action) and OCR box buttons
+
+- 截屏取词 is a capture mode (`--mode textgrab`), not an editor tool: region → grab → background OCR → trimmed text to clipboard only; the editor never opens, no image is copied, no thumbnail. Reuses the frozen frame, delay countdown and `_last_phys` (repeat) like normal region capture.
+- Its OCR runs on a dedicated `OCRWorker` (`automatic=True` for the 20 s bound) instead of `run_ocr()`, so the editor's `_ocr_serial`/pending/toast state stays untouched; feedback is a standalone `_flash_note` (a `_make_hint`-style bypass-WM toast) because the editor's `_toast` lives inside the OCR text box and would be invisible. Not in `SHORTCUT_ACTIONS` for now — toolbar-only.
+- The OCR box bottom-left holds 全部识别 (re-runs `run_ocr(copy_result=False)`) and 全部复制 (copies the text box, empty box keeps the clipboard). Implemented by wrapping `self.text` in a container widget with a button row rather than overlaying buttons.
+- picktext keeps the I-beam cursor only while the pointer is over a recognized word box (checked in `mouseMoveEvent` via `_word_at`); the default cursor is the arrow, and word-box-free images never show an I-beam. Rationale: a permanent I-beam suggested selectable text everywhere there is none.
+
+## Persistent autostart unit
+
+- `~/.config/systemd/user/kapture.service` runs the **dev repo** `run.sh --background` (latest code, no sudo, survives without /opt) rather than `/opt/kapture` (root-owned, upstream-upgrade-overwritten). Trade-off accepted: deleting/moving the dev checkout breaks autostart.
+- `WantedBy=graphical-session.target` + `PartOf=graphical-session.target` (the unit must die and restart with the graphical session, and a plain `--background` process exiting is a clean exit that `Restart=on-failure` will not resurrect); no hard-coded `Environment=DISPLAY=:0` — the real `DISPLAY`/`XAUTHORITY`/`DBUS_SESSION_BUS_ADDRESS` come via `PassEnvironment` from the user manager, so a different screen number cannot break startup.
 
 ## Floating card icons and OCR display gating
 
@@ -52,4 +64,4 @@
 
 ## Pending follow-ups from user feedback
 
-- A one-click 截屏取词 toolbar/shortcut action (region → OCR → clipboard, no editor) was requested conceptually ("screen text grab"); the `textgrab` icon and translation keys (`t_ocr` 等) are already in the file but the action itself is not wired yet — awaiting confirmation.
+- (none currently open)

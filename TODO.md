@@ -6,16 +6,13 @@
 
 ## 待办（Next）
 
-- [ ] **一键"截屏取词"（待用户确认是否需要）。** 工具栏/快捷键直接框选→OCR→文字进
-  剪贴板、不进编辑器（PixPin 的"文本"模式）。图标（textgrab）与翻译键（t_ocr）已
-  预埋，动作本体未接线。编辑器内已有等效路径（默认 picktext 工具拖框→OCR 并复制）。
+- [ ] **注销/重启后自启的实测确认。** service 已 enable 且当前 active，但真实登录
+  会话的自动拉起要到下次注销/重启才能观察到。自启绑定 dev 仓库路径，移动/删除
+  checkout 会破坏自启。
 
 - [ ] **截屏顶栏问题的逐项口头确认（低优先级）。** 用户已确认"现在修好了"；选区层
   bypass 改动在实机可用，但"顶栏/dock 完全盖住、框选与内容零错位、Esc 取消正常"
   尚未逐项确认，后续使用中留意即可。
-- [ ] **常驻自启。** `~/.config/systemd/user/kapture.service`（跑 /opt/kapture，
-  WantedBy=default.target）已起草未安装启用；当前验证实例是手起的
-  `kapture.py --background`（借用 /opt venv），注销/重启后不会自启。
 
 ## 分发 / 持久化
 
@@ -25,6 +22,20 @@
 ---
 
 ## 已完成（沉底）
+
+- [x] **一键"截屏取词"。** 主工具栏新增取词按钮（取景框+文本行图标，区域截图右侧）：
+  框选→后台 OCR→仅trim后文字进剪贴板，不进编辑器、不复制图片；独立置顶浮层提示
+  "已复制 N 字符"/未识别/错误；选区纳入"重复上次区域"。运行实例截图确认按钮渲染。
+- [x] **OCR 框左下角"全部识别 / 全部复制"两按钮 + picktext 光标按需变 I 形。** 全部
+  识别=对当前图重跑 OCR；全部复制=复制整个结果框（空框不动剪贴板）。光标默认箭头，
+  仅悬停到已识别单词框上方变 I 形（mouseMoveEvent 里用 `_word_at` 判定）。新增 13 项
+  测试，49 项全绿。
+- [x] **常驻自启安装启用。** `kapture.service` 改跑 dev 仓库 `run.sh --background`，
+  `WantedBy=graphical-session.target`，去硬编码 DISPLAY 改 `PassEnvironment`；
+  enable+active，单实例转发与显示/总线访问实机验证通过。手起的 /opt 验证实例已退役。
+- [x] **`_bring_to_front` 实机验证。** 走与托盘左键完全相同的 `handle_command("show")`
+  路径以 `--settings`/`--show` 实测：窗口在真实 GNOME/X11 会话中成功前置并获焦
+  （`_NET_WM_STATE_FOCUSED`）。
 
 - [x] **"进入编辑器默认是画方框,应默认可选图中文字做 OCR"。** 新增 picktext 工具并
   设为编辑器默认：拖虚线框→仅识别框内区域并复制文字；Enter 重复识别上一次拖框区域；

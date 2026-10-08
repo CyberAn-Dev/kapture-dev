@@ -101,6 +101,50 @@ class PickTextTest(unittest.TestCase):
         self._drag(QtCore.QPoint(10, 20), QtCore.QPoint(150, 60))
         self.assertEqual(self.window.canvas.base.height(), 40)
 
+    def _move(self, pt):
+        ev = QtGui.QMouseEvent(QtCore.QEvent.MouseMove, pt,
+                               QtCore.Qt.NoButton, QtCore.Qt.NoButton,
+                               QtCore.Qt.NoModifier)
+        QtWidgets.QApplication.sendEvent(self.window.canvas, ev)
+
+    def test_picktext_cursor_is_arrow_off_words_ibeam_over_words(self):
+        img = np.full((200, 400, 3), 255, dtype=np.uint8)
+        self.window.canvas.set_image_bgr(img)
+        self.window.canvas.set_word_boxes(self.WORDS)
+        self._move(QtCore.QPoint(300, 150))          # empty area
+        self.assertEqual(self.window.canvas.cursor().shape(), QtCore.Qt.ArrowCursor)
+        self._move(QtCore.QPoint(30, 17))            # over "hello"
+        self.assertEqual(self.window.canvas.cursor().shape(), QtCore.Qt.IBeamCursor)
+        self._move(QtCore.QPoint(300, 150))          # back off -> arrow again
+        self.assertEqual(self.window.canvas.cursor().shape(), QtCore.Qt.ArrowCursor)
+
+    def test_picktext_cursor_stays_arrow_without_word_boxes(self):
+        img = np.full((200, 400, 3), 255, dtype=np.uint8)
+        self.window.canvas.set_image_bgr(img)
+        self._move(QtCore.QPoint(30, 17))
+        self.assertEqual(self.window.canvas.cursor().shape(), QtCore.Qt.ArrowCursor)
+
+    def test_ocr_box_all_buttons_exist_and_are_localized(self):
+        self.assertTrue(self.window.btn_ocr_all.text())
+        self.assertTrue(self.window.btn_copy_all.text())
+
+    def test_copy_all_copies_text_box_content(self):
+        self.app.clipboard().setText("sentinel")
+        self.window.text.setPlainText("  line one\nline two  ")
+        self.window.btn_copy_all.click()
+        self.assertEqual(self.app.clipboard().text(), "line one\nline two")
+
+    def test_copy_all_on_empty_box_keeps_clipboard(self):
+        self.app.clipboard().setText("keepme")
+        self.window.text.clear()
+        self.window.btn_copy_all.click()
+        self.assertEqual(self.app.clipboard().text(), "keepme")
+
+    def test_recognize_all_reruns_ocr(self):
+        with mock.patch.object(self.window, "run_ocr") as run_ocr:
+            self.window.btn_ocr_all.click()
+        run_ocr.assert_called_once_with(copy_result=False)
+
 
 if __name__ == "__main__":
     unittest.main()

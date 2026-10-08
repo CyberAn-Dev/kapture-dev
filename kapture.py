@@ -239,6 +239,8 @@ TR = {
     "st_ocr_text": {"zh": "文字", "en": "text"},
     "st_ocr_none": {"zh": "未识别到文字", "en": "No text recognized"},
     "t_ocr": {"zh": "截屏取词", "en": "Screen text grab"},
+    "t_ocr_all": {"zh": "全部识别", "en": "Recognize all"},
+    "t_copy_all": {"zh": "全部复制", "en": "Copy all"},
     "card_edit": {"zh": "编辑标注", "en": "Edit annotations"},
     "card_copy": {"zh": "复制图片", "en": "Copy image"},
     "card_save": {"zh": "保存图片", "en": "Save image"},
@@ -391,6 +393,11 @@ def line_icon(name, color="#d2d2da", size=22):
                                        Pt(12.6, 21.5), Pt(14.4, 20.6),
                                        Pt(12.6, 17), Pt(16.2, 16.6)]))
         p.setBrush(Qt.NoBrush)
+    elif name == "textgrab":   # capture-a-region + text: viewfinder corners around text lines
+        for cx, cy, dx, dy in [(3, 3, 1, 1), (21, 3, -1, 1),
+                               (3, 21, 1, -1), (21, 21, -1, -1)]:
+            L(cx, cy, cx + 4 * dx, cy); L(cx, cy, cx, cy + 4 * dy)
+        L(7, 10, 17, 10); L(7, 13.5, 17, 13.5); L(7, 17, 13, 17)
     else:
         Ell(7, 7, 10, 10)
     p.end()
@@ -1125,7 +1132,6 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.cur = None             # annotation currently being drawn
         self.scale = 1.0
         self.tool = "picktext"
-        self.setCursor(Qt.IBeamCursor)    # default tool selects words with a text cursor
         self._word_boxes = []       # [(QRectF image coords, word)] from the last OCR
         self._sel_from = None       # picktext selection: index range endpoints
         self._sel_to = None
@@ -1169,8 +1175,9 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def set_tool(self, name):
         self.tool = name
-        # word selection uses the text I-beam, other tools the normal pointer
-        self.setCursor(Qt.IBeamCursor if name == "picktext" else Qt.ArrowCursor)
+        # picktext shows the I-beam only while hovering a recognized word (updated in
+        # mouseMoveEvent); other tools always use the normal pointer.
+        self.setCursor(Qt.ArrowCursor)
 
     def set_color(self, qcolor):
         self.color = qcolor
@@ -1397,6 +1404,12 @@ class AnnotateCanvas(QtWidgets.QWidget):
                 if i is not None and i != self._sel_to:
                     self._sel_to = i
                     self.update()
+                return
+            # not dragging: the I-beam appears only over a selectable word
+            over_word = self._word_at(self._to_img(e.pos())) is not None
+            want = Qt.IBeamCursor if over_word else Qt.ArrowCursor
+            if self.cursor().shape() != want:
+                self.setCursor(want)
             return
         if self.cur is None:
             return
@@ -1918,11 +1931,13 @@ class MainWindow(QtWidgets.QWidget):
         top = QtWidgets.QHBoxLayout(); top.setSpacing(8)
         self.btn_single = self._tbtn("region", "")
         self.btn_single.setObjectName("primaryCapture")
+        self.btn_textgrab = self._tbtn("textgrab", "")
         self.btn_window = self._tbtn("window", "")
         self.btn_scroll = self._tbtn("scroll", "")
         self.btn_manual = self._tbtn("manual", "")
         self.btn_record = self._tbtn("record", "")
-        top.addWidget(self._toolbar_group((self.btn_single, self.btn_window,
+        top.addWidget(self._toolbar_group((self.btn_single, self.btn_textgrab,
+                                           self.btn_window,
                                            self.btn_scroll, self.btn_manual,
                                            self.btn_record)))
         self.btn_colorpick = self._tbtn("color", "")
@@ -2039,8 +2054,23 @@ class MainWindow(QtWidgets.QWidget):
         layout.addWidget(self.scroll, 3)
 
         # ---------- OCR text result ---------- #
+        ocr_box = QtWidgets.QWidget()
+        ocr_lay = QtWidgets.QVBoxLayout(ocr_box)
+        ocr_lay.setContentsMargins(0, 0, 0, 0)
+        ocr_lay.setSpacing(4)
         self.text = QtWidgets.QPlainTextEdit()
-        layout.addWidget(self.text, 2)
+        ocr_lay.addWidget(self.text)
+        btn_row = QtWidgets.QHBoxLayout(); btn_row.setSpacing(6)
+        self.btn_ocr_all = QtWidgets.QPushButton()
+        self.btn_copy_all = QtWidgets.QPushButton()
+        for b in (self.btn_ocr_all, self.btn_copy_all):
+            b.setFixedHeight(26)
+            b.setCursor(Qt.PointingHandCursor)
+        btn_row.addWidget(self.btn_ocr_all)
+        btn_row.addWidget(self.btn_copy_all)
+        btn_row.addStretch(1)          # buttons hug the bottom-left of the OCR box
+        ocr_lay.addLayout(btn_row)
+        layout.addWidget(ocr_box, 2)
 
         self.status = QtWidgets.QLabel()
         self.status.setObjectName("status")
@@ -2053,7 +2083,10 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_manual.clicked.connect(lambda: self.start_select("manual"))
         self.btn_scroll.clicked.connect(lambda: self.start_select("scroll"))
         self.btn_single.clicked.connect(lambda: self.start_select("single"))
+        self.btn_textgrab.clicked.connect(lambda: self.start_select("textgrab"))
         self.btn_ocr.clicked.connect(lambda: self.run_ocr())
+        self.btn_ocr_all.clicked.connect(lambda: self.run_ocr(copy_result=False))
+        self.btn_copy_all.clicked.connect(self._copy_all_text)
         self.btn_copy.clicked.connect(self.copy_image)
         self.btn_pin.clicked.connect(self.pin_image)
         self.btn_save.clicked.connect(self.save_image)
@@ -2079,7 +2112,8 @@ class MainWindow(QtWidgets.QWidget):
         """Refresh the main UI text according to the current language (called when switching languages)."""
         self.setWindowTitle(t("app_title"))
         tips = {
-            self.btn_single: "cap_region", self.btn_window: "cap_window",
+            self.btn_single: "cap_region", self.btn_textgrab: "t_ocr",
+            self.btn_window: "cap_window",
             self.btn_scroll: "cap_scroll", self.btn_manual: "cap_manual",
             self.btn_record: "cap_record", self.btn_colorpick: "cap_color",
             self.btn_repeat: "cap_repeat", self.btn_history: "t_history",
@@ -2090,6 +2124,8 @@ class MainWindow(QtWidgets.QWidget):
         }
         for w, key in tips.items():
             w.setToolTip(t(key))
+        self.btn_ocr_all.setText(t("t_ocr_all"))
+        self.btn_copy_all.setText(t("t_copy_all"))
         for name, b in self._tool_btns.items():
             b.setToolTip(t("a_" + name))
         self._lab_delay.setText(t("lab_delay"))
@@ -2114,7 +2150,8 @@ class MainWindow(QtWidgets.QWidget):
             theme = "dark" if system_prefers_dark() else "light"
         colors = THEMES.get(theme, THEMES["dark"])
         for button, name in (
-                (self.btn_single, "region"), (self.btn_window, "window"),
+                (self.btn_single, "region"), (self.btn_textgrab, "textgrab"),
+                (self.btn_window, "window"),
                 (self.btn_scroll, "scroll"), (self.btn_manual, "manual"),
                 (self.btn_record, "record"), (self.btn_colorpick, "color"),
                 (self.btn_repeat, "repeat"), (self.btn_history, "history"),
@@ -2266,7 +2303,7 @@ class MainWindow(QtWidgets.QWidget):
         """Single-instance command dispatch: sent from this process or a later-launched process."""
         if cmd == "background":
             self.hide()
-        elif cmd in ("single", "manual", "scroll"):
+        elif cmd in ("single", "manual", "scroll", "textgrab"):
             self.start_select(cmd)
         elif cmd == "window":
             self.capture_window()
@@ -2308,6 +2345,8 @@ class MainWindow(QtWidgets.QWidget):
                 int(gr.width() * dpr), int(gr.height() * dpr))
         if self._mode == "single":
             QtCore.QTimer.singleShot(150, lambda: self._single_shot(phys, frozen))
+        elif self._mode == "textgrab":
+            QtCore.QTimer.singleShot(150, lambda: self._textgrab_shot(phys, frozen))
         elif self._mode == "manual":
             QtCore.QTimer.singleShot(150, lambda: self._manual_start(phys, gr))
         else:
@@ -2320,6 +2359,55 @@ class MainWindow(QtWidgets.QWidget):
         grab = (lambda: frozen) if frozen is not None else (lambda: grab_region(*phys))
         self._grab_with_delay(
             lambda: self._present_capture(grab(), f"Region captured: {phys[2]}×{phys[3]} px"))
+
+    # --- screen text grab (PixPin "text" mode): grab → OCR → clipboard, no editor --- #
+    def _textgrab_shot(self, phys, frozen=None):
+        """Grab the selected region, OCR it, and copy only the text — the editor
+        never opens and the image is not put on the clipboard."""
+        self._last_phys = phys              # remember it for "repeat last area"
+        grab = (lambda: frozen) if frozen is not None else (lambda: grab_region(*phys))
+
+        def go():
+            img = grab()
+            if img is None:
+                return
+            self._flash_note(t("st_ocr_running"))
+            self._grab_ocr(img)
+        self._grab_with_delay(go)
+
+    def _grab_ocr(self, img):
+        """Background OCR for the text-grab action. Reuses the configured language,
+        layout and enhancement but runs its own worker, so the editor's serial/toast/
+        text-box state is untouched."""
+        worker = OCRWorker(img, self.lang.currentText(), self.psm.currentData(),
+                           self.enhance.isChecked(), automatic=True, parent=self)
+        self._ocr_workers.append(worker)
+        worker.result.connect(self._on_grab_ocr_result)
+        worker.finished.connect(lambda: self._release_ocr_worker(worker))
+        worker.start()
+
+    def _on_grab_ocr_result(self, txt, error):
+        if error:
+            self._flash_note(error)
+            return
+        text = (txt or "").strip()
+        if not text:
+            self._flash_note(t("st_ocr_none"))
+            return
+        QtWidgets.QApplication.clipboard().setText(text)
+        n = len(text)
+        self._flash_note(f"Copied {n} chars" if _LANG == "en" else f"已复制 {n} 字符")
+
+    def _flash_note(self, msg):
+        """Standalone on-top toast for actions that never open the editor (the editor's
+        own _toast lives inside the OCR text box and would be invisible here)."""
+        note = _make_hint(msg)
+        note.show()
+        self._flash_notes = [w for w in getattr(self, "_flash_notes", [])
+                             if w.isVisible()]          # drop faded ones, keep refs live
+        self._flash_notes.append(note)
+        QtCore.QTimer.singleShot(2600, note.close)
+
 
     # --- delay countdown --- #
     def _grab_with_delay(self, grab_fn):
@@ -2754,6 +2842,16 @@ class MainWindow(QtWidgets.QWidget):
         else:
             self._toast(f"OCR 完成{'，已复制文字' if copy_result else ''}（{len(txt)} 字符）")
         self.text.setPlainText(txt)
+
+    def _copy_all_text(self):
+        """Copy the whole OCR text box to the clipboard (bottom-left OCR box button)."""
+        txt = self.text.toPlainText().strip()
+        if not txt:
+            self._toast(t("st_ocr_none"))
+            return
+        QtWidgets.QApplication.clipboard().setText(txt)
+        n = len(txt)
+        self._toast(f"Copied {n} chars" if _LANG == "en" else f"已复制 {n} 字符")
 
     # --- copy image to clipboard --- #
     def copy_image(self):
