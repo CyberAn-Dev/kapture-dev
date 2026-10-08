@@ -22,6 +22,7 @@ mkdir -p "$INST" \
 
 # --- payload (layout identical to the upstream 1.0.0 package) --- #
 cp "$DIR/kapture.py" "$INST/kapture.py"
+cp "$DIR/history_store.py" "$INST/history_store.py"
 cp "$DIR/kapture.png" "$INST/kapture.png"
 cp "$DIR/kapture.png" "$ROOT/usr/share/icons/hicolor/256x256/apps/kapture.png"
 cp "$DIR/README.md" "$ROOT/usr/share/doc/kapture/README.md"

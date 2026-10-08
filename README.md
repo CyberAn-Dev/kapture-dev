@@ -36,11 +36,11 @@ Capture, extract text, and keep visual references at hand on Linux X11.
 
 | Tool | What it does |
 | --- | --- |
-| Capture | Region or window capture, window snapping, color picker, and repeat last region. |
+| Capture | Annotate, extract text, copy, or save immediately after selection; open the full editor when needed. |
 | Scrolling capture | Automatic up/down or manual scrolling, with live preview and duplicate-aware stitching. |
 | OCR | Chinese and English recognition, automatic OCR after capture, editor text selection, and screen text grab. |
-| Pin images | Keep clipboard images on top; move, resize, adjust opacity, or copy recognized text. |
-| Edit and export | Annotate, crop, save, copy, or export with a background and shadow. |
+| Pin images | Keep images on top, zoom, adjust opacity, annotate, and drag across recognized words to copy. |
+| Edit and export | Undo/redo, move/delete annotations, change color/width, double-click to edit text, crop, and beautify. |
 | Record | Capture the screen as MP4 or GIF; adjust frame rate. |
 | Desktop | GNOME and KDE Plasma 5 shortcuts, themes, system tray, and background launch. |
 
@@ -94,9 +94,13 @@ GNOME restores saved Kapture shortcuts at startup. Change conflicting combinatio
 | Pin newest / previous clipboard image | Ctrl+1 / Ctrl+2 (GNOME defaults, configurable) |
 | Zoom / adjust pin opacity | Scroll / Ctrl+scroll |
 | Recognize text in a pin | O or context menu |
+| Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
+| Delete selected annotation | Delete |
 | Stop scrolling capture / close focused pin | Esc |
 
-The pin context menu offers click-through; restore interaction from the tray. Clipboard image history keeps the last 10 images observed in the current session.
+Captures open in-place editing by default: Enter copies, Esc cancels, and the toolbar opens the full editor. The “open editor after capture” setting takes priority; turn both off to use thumbnails. Right-click a pin to annotate or select text; restore click-through pins from the tray.
+
+History stays on this machine and survives restarts: up to 30 screenshots and 10 clipboard images, with a separate 40-million-pixel budget per collection; the newest image is always retained. Clear both collections from the history window.
 
 ## Command line
 
@@ -111,6 +115,7 @@ Kapture Dev is an independent open-source fork of [Kapture](https://github.com/y
 
 - X11 only; Wayland is not supported. In-app global shortcut setup is available on GNOME and KDE Plasma 5.
 - Scrolling capture is limited to 40,000 pixels in height. Dynamic pages, overlays, lazy loading, and repeated content can affect alignment; it is not a browser full-page export.
+- Capture coordinates across monitors with different scaling factors are not fully verified.
 - OCR accuracy depends on text size, font, and image quality. Tesseract and its Chinese and English language packs must be installed.
 
 ## Contribute and license

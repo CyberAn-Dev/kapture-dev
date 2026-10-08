@@ -76,6 +76,46 @@ class ScrollRegressionTest(unittest.TestCase):
         page = np.tile(rows, (40, 1, 1))
         self.assertIsNone(kapture.locate_frame(page[:400], page[10:410])[0])
 
+    def test_localized_loaded_content_does_not_reject_stable_overlap(self):
+        page = np.random.RandomState(73).randint(0, 256, (1200, 300, 3), dtype=np.uint8)
+        previous = page[:400].copy()
+        current = page[100:500].copy()
+        current[100:140] = np.random.RandomState(1140).randint(
+            0, 256, (40, 300, 3), dtype=np.uint8
+        )
+
+        y, _ = kapture.locate_frame(previous, current, 100)
+
+        self.assertEqual(y, 100)
+        stitched, _ = kapture.stitch_frame(previous, current, y)
+        np.testing.assert_array_equal(stitched, page[:500])
+
+    def test_two_small_loaded_regions_preserve_stable_overlap(self):
+        page = np.random.RandomState(74).randint(0, 256, (1200, 300, 3), dtype=np.uint8)
+        previous = page[:400].copy()
+        current = page[100:500].copy()
+        current[100:112] = np.random.RandomState(1112).randint(
+            0, 256, (12, 300, 3), dtype=np.uint8
+        )
+        current[130:142] = np.random.RandomState(1142).randint(
+            0, 256, (12, 300, 3), dtype=np.uint8
+        )
+
+        y, _ = kapture.locate_frame(previous, current, 100)
+
+        self.assertEqual(y, 100)
+        stitched, _ = kapture.stitch_frame(previous, current, y)
+        np.testing.assert_array_equal(stitched, page[:500])
+
+    def test_single_local_match_cannot_establish_frame_position(self):
+        canvas = np.random.RandomState(81).randint(0, 256, (400, 300, 3), dtype=np.uint8)
+        current = np.random.RandomState(82).randint(0, 256, (400, 300, 3), dtype=np.uint8)
+        current[150:250] = canvas[50:150]
+
+        y, _ = kapture.locate_frame(canvas, current, -100)
+
+        self.assertIsNone(y)
+
     def test_numbered_text_rows_are_distinguishable(self):
         image = QtGui.QImage(540, 1000, QtGui.QImage.Format_RGB32)
         image.fill(QtCore.Qt.white)

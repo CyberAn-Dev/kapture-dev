@@ -35,10 +35,10 @@
 
 ## Pin clipboard images (Ctrl+1 / Ctrl+2)
 
-- Shortcut labels must map `--pin1` and `--pin2` to their existing localized pin descriptions; neither action is region capture. The clipboard image history is in-process, so the previous image must have been observed in the current application session.
+- Shortcut labels must map `--pin1` and `--pin2` to their existing localized pin descriptions; neither action is region capture. Clipboard image history is now persisted locally and restored across sessions; the previous image must have been observed by Kapture.
 
 - Pin-to-clipboard is PixPin-style: Ctrl+1 pins the most recent image on the system clipboard, Ctrl+2 pins the one before it, and Esc closes a pinned window. Reuse the existing global-shortcut pipeline (GNOME custom-keybinding / KDE KHotKey running `run.sh --pin1|--pin2`); the new actions join `SHORTCUT_ACTIONS` so they appear in the shortcuts tab automatically.
-- The data source is a Kapture-internal image history built from `QClipboard.dataChanged` (newest first, capped at 10). No clipboard manager is installed and neither GNOME nor X11 exposes a readable history API, so the process must track images itself; Kapture's own `self.history` is not the source.
+- The data source is a Kapture-internal image history built from `QClipboard.dataChanged` (newest first, capped at 10 and persisted with the history store). No clipboard manager is installed and neither GNOME nor X11 exposes a readable history API, so the process must track images itself; Kapture's own `self.history` is not the source.
 - Both defaults live in `DEFAULT_KEYS`: the shortcuts tab prefills them even when unregistered, and GNOME auto-registers them once on first run without overwriting an existing binding. The user accepted that global Ctrl+1/Ctrl+2 steal tab switching from Chrome/Edge/Firefox; no additional quit-style global shortcut was added (a `Ctrl+Alt+*` probe found Q free, but the user chose to keep only Ctrl+1/2).
 
 ## Shortcut save semantics and overlay window flags
@@ -102,3 +102,17 @@
 ## Product documentation (2026-10-08)
 
 - Maintain matching English and Chinese product READMEs for this fork. Point installation and contribution links at CyberAn-Dev/kapture-dev while retaining upstream attribution. Document local package building without implying a published fork release; use actual current Qt widget captures with demonstration content and isolated settings for product screenshots. Lead with the Linux X11 PixPin-alternative positioning, inspired by the Flameshot README structure (https://github.com/flameshot-org/flameshot#readme). Keep independent upstream attribution and state that this is workflow coverage, not complete PixPin feature parity; retain concrete limitations.
+
+## Shared editing and persistent history (2026-10-08)
+
+- Reuse AnnotateCanvas on all three surfaces: full editor, inline capture, and pins. Transfer base image, annotations and undo/redo state instead of flattening when opening another editing surface. Only export/copy/history images are flattened. Selection decoration never enters exports. Cropping preserves translated annotations and supports undo.
+- Default to inline editing after capture; the existing explicit open-editor preference takes priority, and disabling both keeps the thumbnail workflow. Commit history/auto-copy/auto-save only after a confirmed inline action; cancellation leaves them unchanged. Refuse another capture while inline work is unfinished. Bypass-WM editing releases keyboard grabs for modal dialogs and follows focus within its controls.
+- Reuse OCRWorker for selectable words on pins/inline captures, with image-generation checks, bounded Tesseract calls, and deferred window deletion until workers finish. Retain the existing whole-pin OCR action.
+- Store local PNGs and atomically replace JSON manifests beside QSettings under `history/`. Keep at most 30 captures / 10 clipboard images and 40M total pixels per collection, always retaining the newest image at original resolution. Read dimensions before decoding; reuse stored PNGs rather than re-encoding old images. HistoryWriter serializes writes off the GUI thread and coalesces pending snapshots; clear barriers preserve new captures without resurrecting older records. Flush on normal application exit. No published package is implied; the .deb builder includes history_store.py.
+- Preserve strict scroll overlap validation. Only fall back to a localized changed region when two stable, complete anchor strips agree on the same offset; retain blank/repeated-content and gap rejection. Mixed-DPI screen coordinates and arbitrary dynamic-page reliability remain outside the verified evidence.
+
+- Unfinished inline captures retain ownership until confirmed or cancelled. Capture/record-start and tray settings commands defer to that edit; stopping an already active recording remains available.
+
+- User scope: target Xorg/X11 only; Wayland is not a planned requirement. Run the existing changes through the desktop user service without resetting settings/history, and deliver after the user-authorized text-entry correction.
+
+- Xorg inline text dialogs use the same bypass-window-manager stacking layer as the capture overlay. Retain normal managed dialogs in the full editor; verify visibility and real keyboard input instead of only setting dialog values programmatically.

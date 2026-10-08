@@ -32,6 +32,7 @@ class AutoOcrTest(unittest.TestCase):
         self.settings = QtCore.QSettings("ScrollShot", "ScrollShot")
         self.settings.clear()
         self.settings.setValue("ocr_lang", "eng")
+        self.settings.setValue("inline_edit", False)
         self.window = kapture.MainWindow()
         self.window.show()
         self.app.processEvents()

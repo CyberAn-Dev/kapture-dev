@@ -2,7 +2,7 @@
 
 ## Current state
 
-- 2026-10-08: the user accepted the current workspace version as the local working version. Delivery includes scrolling fixes, OCR styling/shortcut labels, pin enhancements, window snapping, dependency updates, tests and documentation; `.serena/` remains local tooling state.
+- 2026-10-08: local working tree now includes shared inline/pin editing, annotation undo/redo and object modification, persistent local histories, and a bounded dynamic-scroll matching improvement. The user authorized commit/push and desktop restart after the text-entry fix; `.serena/` remains excluded local tooling state.
 
 - Source installation reuses Ubuntu Python packages through a virtual environment with system package access. pip installs only `mss` and `pytesseract`.
 - The shortcuts tab is visible on every desktop. GNOME custom shortcuts and KDE Plasma 5 KHotKeys can be edited in-app; other desktops show the command lines to bind in system settings.
@@ -13,6 +13,13 @@
 - Output actions align beside their label. Ctrl+Z undoes annotations except when the OCR text box has focus, where it undoes text edits. Automatic OCR is enabled by default and can be disabled in settings.
 
 ## Completed
+
+- 2026-10-08 editing follow-up: new captures enter an in-place toolbar by default while retaining the full editor and optional thumbnail workflow. Pins support direct annotation and selectable OCR words. All surfaces reuse the same canvas and transfer editable documents with undo/redo; selected objects can move, change style, delete, and edit text. Cancelled captures do not change clipboard/history, failed saves stay open, unfinished captures are not silently replaced, and OCR windows retire safely.
+- Xorg text-entry fix: new/edit text dialogs match the capture overlay stacking layer, preventing hidden input prompts. Real X11 regression checks both window stacking and XTest keyboard input; it failed before the fix and passed afterward.
+- Final verification: 161 offscreen tests pass; the isolated .deb build contains both application modules. Capture, record-start and tray settings entry points preserve unfinished inline edits; stopping an active recording remains available. The desktop user service was restarted from this working tree at 17:49 CST on 2026-10-08 and remained active under Python. Settings/history were preserved; user testing identified the text-dialog stacking defect, now fixed and approved for delivery. No package installation was performed.
+- Screenshot and clipboard image histories persist locally with atomic manifests and background writes, count/pixel limits, restart restoration, and a clear action. Queued writes coalesce; clearing while capturing keeps new entries without reviving old ones. The .deb payload includes the history module.
+- Scroll reliability: a reproduced single localized dynamic block no longer rejects a correct overlapping frame when two independent anchors agree. Strict acceptance of smaller separated changes is preserved; gap and repeated-row rejection remain covered.
+- Real X11 validation: actual region-selection pixels equal the demo page; inline drawing, modal text keyboard ownership, editor/pin document transfer and undo/redo passed. Nine scroll runs (manual/down/up with three fixed-edge configurations) each produced the exact expected 1000-pixel image over seven frames with no control hides. This remains controlled-page evidence.
 
 - 2026-10-08: refreshed both READMEs as the current fork product introduction, covering bidirectional scrolling, OCR text grab, clipboard pins, selection snapping, themes, current repository installation and local package builds. Corrected outdated capture-control and fixed-header descriptions; distinguished background launch from login autostart and upstream packages from fork source. Both introductions now lead with the Linux X11 PixPin-alternative positioning, workflow examples, compact feature and shortcut tables, and quick-start instructions; secondary settings content is collapsible. The layout references Flameshot's product README, and explicitly separates everyday workflow coverage from full PixPin feature parity. Replaced editor/settings images with captures of the current Qt widgets using an isolated configuration and demonstration content; the displayed OCR text was produced by Tesseract. Images were visually inspected.
 
@@ -62,12 +69,14 @@
 
 ## Blockers and next step
 
+- Mixed-DPI multi-monitor capture coordinates remain unverified; arbitrary dynamic pages may still stop on ambiguous matches. Desktop-session access was obtained for the authorized service restart; the current working tree is running for user testing.
+
 - No blocker remains for the reproduced fixed-header, narrow-edge, gray-seam and transient-warning cases. Ambiguous repeated rows, changing sticky overlays, and animated content may still prevent alignment; fixed margins are identified from the initial matched movement, not continuously re-learned. Other compositors and arbitrary-page quality remain unverified. Controls remain visible during grabs.
 
 - A full source installation was not run because it requires administrator access and a download of the two remaining Python packages.
 - The upstream `.deb` is independent of this repository's install script and code changes; build and publish a fork release package to distribute them through `.deb`.
 - System appearance is sampled on launch and when settings are saved; changing the desktop appearance while Kapture stays open requires reopening or resaving settings.
-- PixPin comparison (2026-10-08) closed most former gaps; remaining product gaps: QR recognition, OCR translation, recording enhancements (keystroke overlay, audio), pin groups/pin-second-order operations beyond OCR, Wayland. Click-through and hover-snap are live-verified only insofar as the offscreen suite plus the running instance; XShape behavior under the compositor and frame-extent inflation of snapped rects (KWin shadows included, same as window capture) should be watched during hands-on use.
+- PixPin comparison (2026-10-08) closed most former gaps; remaining product gaps: QR recognition, OCR translation, recording enhancements (keystroke overlay, audio), pin groups/multi-content pins. Wayland is explicitly outside the requested scope; development targets Xorg/X11. Click-through and hover-snap are live-verified only insofar as the offscreen suite plus the running instance; XShape behavior under the compositor and frame-extent inflation of snapped rects (KWin shadows included, same as window capture) should be watched during hands-on use.
 - GNOME may already own a chosen global combination; such a conflict must be resolved in the desktop's Keyboard settings.
 - A persistent user service `~/.config/systemd/user/kapture.service` is enabled and running (dev repo `run.sh --background`, `WantedBy=graphical-session.target`); a logout/reboot self-start has not been observed yet — it will be confirmed at the next actual login. The autostart binds to the dev checkout: moving or deleting it breaks autostart.
 - The `_bring_to_front` restore path is live-verified via `--show`/`--settings`; a literal tray-icon click on the GNOME top bar has not been clicked by hand (same handler, so expected to work).

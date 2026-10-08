@@ -27,6 +27,7 @@ from Xlib.error import ConnectionClosedError
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QRect, QThread, pyqtSignal
+from history_store import ImageHistoryStore, HistoryWriter
 
 
 # --------------------------------------------------------------------------- #
@@ -121,6 +122,22 @@ def t(key):
 
 
 TR = {
+    "history_clearing": {"zh":"正在清空历史…", "en":"Clearing history…"},
+    "history_cleared": {"zh":"历史已清空", "en":"History cleared"},
+    "pin_edit_hint": {"zh":"选择可移动标注；右键取词 / 保存，Esc 关闭钉图", "en":"Select to move; right-click for text / save; Esc closes pin"},
+    "finish_capture_first": {"zh":"请先完成或取消当前截图", "en":"Finish or cancel the current capture first"},
+    "a_select": {"zh":"选择 / 移动标注（Delete 删除，双击改文字）", "en":"Select / move (Delete removes, double-click edits text)"},
+    "a_redo": {"zh":"重做", "en":"Redo"},
+    "edit_hint": {"zh":"选择工具可移动标注；Enter 复制，Esc 取消", "en":"Select to move annotations; Enter copies, Esc cancels"},
+    "select_words_hint": {"zh":"拖选文字即可复制", "en":"Drag across words to copy"},
+    "open_editor": {"zh":"在编辑器打开", "en":"Open in editor"},
+    "pin_edit": {"zh":"标注 / 编辑", "en":"Annotate / edit"},
+    "pin_select_text": {"zh":"选取文字", "en":"Select text"},
+    "finish_edit": {"zh":"完成标注", "en":"Finish editing"},
+    "save_failed": {"zh":"保存失败，请选择可写入的路径", "en":"Save failed; choose a writable path"},
+    "set_inline": {"zh":"截图后原位编辑（未选择直接打开编辑器时）", "en":"Edit in place after capture (unless opening the editor)"},
+    "clear_history": {"zh":"清空截图与剪贴板图片历史", "en":"Clear screenshot and clipboard image history"},
+
     "app_title": {"zh": "Kapture", "en": "Kapture"},
     "app_name": {"zh": "Kapture", "en": "Kapture"},
     "app_generic": {"zh": "截图 / OCR / 录屏", "en": "Screenshot / OCR / Recording"},
@@ -396,6 +413,12 @@ def line_icon(name, color="#d2d2da", size=22):
         Ell(5, 5, 10, 10); L(14, 14, 19, 19)
     elif name == "crop":
         L(8, 4, 8, 17); L(8, 17, 20, 17); L(4, 7, 16, 7); L(16, 7, 16, 20)
+    elif name == "select":
+        p.drawPolygon(QtGui.QPolygonF([Pt(6,3),Pt(6,20),Pt(11,15),Pt(18,15)]))
+    elif name == "redo":
+        path = QtGui.QPainterPath(Pt(7,19))
+        path.cubicTo(Pt(4,12),Pt(9,7),Pt(14.5,8.5)); p.drawPath(path)
+        L(14.5,8.5,11.5,6); L(14.5,8.5,11,11)
     elif name == "undo":       # ↩ loop-back arrow
         path = QtGui.QPainterPath(Pt(17, 19))
         path.cubicTo(Pt(20, 12), Pt(15, 7), Pt(9.5, 8.5))
@@ -927,7 +950,9 @@ def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
     """Locate an overlapping viewport; reject blank and ambiguous matches.
 
     Only the bounded search band is converted, independent of total page height.
-    A strip proposes offsets; the entire overlap must agree before extending.
+    A strip proposes offsets; small differences pass the whole-overlap check.
+    Larger localized changes need two independent anchors at one offset and
+    one contiguous changed region.
     """
     ch, h = canvas_bgr.shape[0], frame_bgr.shape[0]
     if h > ch:
@@ -941,12 +966,14 @@ def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
     cg = cv2.cvtColor(canvas_bgr[y0:y1, columns], cv2.COLOR_BGR2GRAY)
     fg = cv2.cvtColor(frame_bgr[:, columns], cv2.COLOR_BGR2GRAY)
     strip_h = min(h, max(24, h // 4))
-    candidates = set()
+    anchor_bases = tuple(dict.fromkeys((0, (h-strip_h)//2, h-strip_h)))
+    anchors, candidates = [], set()
     confidence = 0.0
-    for base in (0, (h-strip_h)//2, h-strip_h):
+    for base in anchor_bases:
         strip = fg[base:base+strip_h]
         if strip.std() < 2 or cg.shape[0] < strip_h:
             continue
+        anchors.append((base, strip))
         scores = cv2.matchTemplate(cg, strip, cv2.TM_CCOEFF_NORMED).ravel()
         confidence = max(confidence, float(scores.max()))
         # Bound work even on repeated table rows; ambiguity is rejected below.
@@ -958,19 +985,42 @@ def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
             scores[max(0, loc-2):loc+3] = -1
     ranked = []
     for y in candidates:
+        # A changed image or lazy-loaded block can invalidate one anchor. For
+        # larger viewports, require two separated strips to support the same
+        # offset before tolerating local differences in the full overlap.
+        independent_anchors = 0
+        covered_anchors = 0
+        for base, strip in anchors:
+            anchor_y = y + base
+            if anchor_y < y0 or anchor_y + strip_h > y1:
+                continue
+            covered_anchors += 1
+            anchor = cg[anchor_y-y0:anchor_y-y0+strip_h]
+            score = float(cv2.matchTemplate(
+                anchor, strip, cv2.TM_CCOEFF_NORMED
+            )[0, 0])
+            independent_anchors += score >= conf_min
+        multi_anchor = covered_anchors >= 2
         lo, hi = max(y0, y), min(y1, y+h)
         if hi-lo < strip_h:
             continue
         delta = np.abs(cg[lo-y0:hi-y0].astype(np.int16) -
                        fg[lo-y:hi-y].astype(np.int16))
         error = float(delta.mean())
-        # White margins dilute mean error on text pages. Differences in a
-        # few glyphs on most rows still mean two different sections, even
-        # when all their boilerplate matches. Permit localized animation,
-        # but not widespread inconsistent rows.
+        # Preserve the original whole-overlap acceptance for small, possibly
+        # separated changes. Larger local animation may use a stricter fallback
+        # only when two anchors independently support the same offset.
         inconsistent_rows = np.count_nonzero(delta > 16, axis=1) > max(2, fg.shape[1] * 0.003)
         if error <= 12 and inconsistent_rows.mean() <= 0.1:
             ranked.append((error, y))
+            continue
+        if (error > 12 or not multi_anchor or independent_anchors < 2):
+            continue
+        changed_rows = np.flatnonzero(inconsistent_rows)
+        if len(changed_rows) and len(changed_rows) != int(
+                changed_rows[-1] - changed_rows[0] + 1):
+            continue
+        ranked.append((error, y))
     ranked.sort()
     if not ranked:
         return None, min(confidence, 0.49)
@@ -1637,6 +1687,18 @@ class ScrollHud(QtWidgets.QWidget):
 # --------------------------------------------------------------------------- #
 # Annotation canvas
 # --------------------------------------------------------------------------- #
+def ungrabbed_dialog(dialog, *args, **kwargs):
+    """Let modal dialogs receive keys while a bypass-WM capture owns the keyboard."""
+    grabber = QtWidgets.QWidget.keyboardGrabber()
+    if grabber is not None:
+        grabber.releaseKeyboard()
+    try:
+        return dialog(*args, **kwargs)
+    finally:
+        if grabber is not None and grabber.isVisible():
+            grabber.grabKeyboard()
+
+
 class AnnotateCanvas(QtWidgets.QWidget):
     """Display the screenshot and allow drawing rectangles/ellipses/arrows/lines/pen/text on it.
 
@@ -1646,6 +1708,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
     cropRequested = QtCore.pyqtSignal(object)   # emits the crop rect (image coordinates, QRectF)
     textSelected = QtCore.pyqtSignal(str)       # picktext: words the user dragged over
     picktextNeedsWords = QtCore.pyqtSignal()    # picktext used before word boxes exist
+    changed = QtCore.pyqtSignal()              # document content changed
 
     def __init__(self):
         super().__init__()
@@ -1657,8 +1720,17 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self._word_boxes = []       # [(QRectF image coords, word)] from the last OCR
         self._sel_from = None       # picktext selection: index range endpoints
         self._sel_to = None
+        self._selected_item = None
+        self._drag_start = None
+        self._drag_item = None
+        self._drag_before = None
+        self._drag_moved = False
+        self._undo_stack = []
+        self._redo_stack = []
+        self._history_limit = 100
         self.color = QtGui.QColor(255, 40, 40)
         self.width = 3
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setMouseTracking(True)
         self.empty_background = "#222228"
         self.empty_text = "#a2a2ad"
@@ -1673,7 +1745,12 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self.cur = None
         self._word_boxes = []
         self._sel_from = self._sel_to = None
+        self._selected_item = None
+        self._drag_start = self._drag_item = self._drag_before = None
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self._apply_size()
+        self.changed.emit()
 
     def set_word_boxes(self, words):
         """Set the selectable word boxes [(QRectF image coords, word)] from OCR."""
@@ -1697,35 +1774,182 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def set_tool(self, name):
         self.tool = name
+        self._selected_item = None
+        self._drag_start = self._drag_item = self._drag_before = None
+        self._drag_moved = False
         # picktext shows the I-beam only while hovering a recognized word (updated in
         # mouseMoveEvent); other tools always use the normal pointer.
         self.setCursor(Qt.ArrowCursor)
 
     def set_color(self, qcolor):
-        self.color = qcolor
+        self.color = QtGui.QColor(qcolor)
+        if self._valid_selection():
+            item = self.items[self._selected_item]
+            if item.get("color") != self.color:
+                before = self._content_state()
+                item["color"] = QtGui.QColor(self.color)
+                self._commit_change(before)
 
     def set_width(self, w):
         self.width = w
+        if self._valid_selection():
+            item = self.items[self._selected_item]
+            if item.get("width") != w:
+                before = self._content_state()
+                item["width"] = w
+                self._commit_change(before)
+
+    @staticmethod
+    def _copy_item(item):
+        if not isinstance(item, dict):
+            return item
+        result = dict(item)
+        if "color" in result:
+            result["color"] = QtGui.QColor(result["color"])
+        for key in ("a", "b"):
+            if isinstance(result.get(key), QtCore.QPointF):
+                result[key] = QtCore.QPointF(result[key])
+        if "pts" in result:
+            result["pts"] = [QtCore.QPointF(pt) for pt in result["pts"]]
+        return result
+
+    @classmethod
+    def _copy_content_state(cls, state):
+        base = state.get("base")
+        return {
+            # QImage values are implicitly shared; later writes detach safely.
+            "base": QtGui.QImage(base) if base is not None else None,
+            "items": [cls._copy_item(item) for item in state.get("items", [])],
+        }
+
+    def _content_state(self):
+        return self._copy_content_state({"base": self.base, "items": self.items})
+
+    def snapshot_document(self):
+        """Copy the image, annotations, and history for editor handoff."""
+        state = self._content_state()
+        state["undo"] = [self._copy_content_state(item) for item in self._undo_stack]
+        state["redo"] = [self._copy_content_state(item) for item in self._redo_stack]
+        return state
+
+    def _restore_content(self, state):
+        copied = self._copy_content_state(state)
+        self.base = copied["base"]
+        self.items = copied["items"]
+        self.cur = None
+        self._word_boxes = []
+        self._sel_from = self._sel_to = None
+        self._selected_item = None
+        self._drag_start = self._drag_item = self._drag_before = None
+        self._drag_moved = False
+        if self.base is None:
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(QtWidgets.QWIDGETSIZE_MAX, QtWidgets.QWIDGETSIZE_MAX)
+        else:
+            self._apply_size()
+
+    def restore_document(self, state):
+        """Restore a state returned by snapshot_document(), including its history."""
+        self._restore_content(state)
+        self._undo_stack = [self._copy_content_state(item)
+                            for item in state.get("undo", [])]
+        self._redo_stack = [self._copy_content_state(item)
+                            for item in state.get("redo", [])]
+        self.update()
+        self.changed.emit()
+
+    def _commit_change(self, before):
+        self._undo_stack.append(self._copy_content_state(before))
+        if len(self._undo_stack) > self._history_limit:
+            del self._undo_stack[:-self._history_limit]
+        self._redo_stack.clear()
+        self.update()
+        self.changed.emit()
+
+    def _valid_selection(self):
+        return (self._selected_item is not None
+                and 0 <= self._selected_item < len(self.items)
+                and isinstance(self.items[self._selected_item], dict))
 
     def undo(self):
-        if self.items:
-            self.items.pop()
+        if self._undo_stack:
+            current = self._content_state()
+            previous = self._undo_stack.pop()
+            self._redo_stack.append(current)
+            self._restore_content(previous)
             self.update()
+            self.changed.emit()
+        elif self.items:
+            # Keep compatibility with callers that append directly to items.
+            current = self._content_state()
+            self._redo_stack.append(current)
+            self.items.pop()
+            self._selected_item = None
+            self.update()
+            self.changed.emit()
+
+    def redo(self):
+        if not self._redo_stack:
+            return
+        current = self._content_state()
+        following = self._redo_stack.pop()
+        self._undo_stack.append(current)
+        if len(self._undo_stack) > self._history_limit:
+            del self._undo_stack[:-self._history_limit]
+        self._restore_content(following)
+        self.update()
+        self.changed.emit()
 
     def clear_items(self):
+        if not self.items:
+            return
+        before = self._content_state()
         self.items.clear()
-        self.update()
+        self._selected_item = None
+        self._commit_change(before)
+
+    def delete_selected(self):
+        if not self._valid_selection():
+            return False
+        before = self._content_state()
+        del self.items[self._selected_item]
+        self._selected_item = None
+        self._commit_change(before)
+        return True
+
+    def crop_image(self, rect):
+        """Crop the base image and translate annotations; return whether it changed."""
+        if self.base is None:
+            return False
+        bounds = QtCore.QRectF(rect).normalized().toAlignedRect().intersected(self.base.rect())
+        if bounds.width() < 1 or bounds.height() < 1:
+            return False
+        before = self._content_state()
+        self.base = self.base.copy(bounds)
+        for item in self.items:
+            self._translate_item(item, QtCore.QPointF(-bounds.x(), -bounds.y()))
+        self._word_boxes = []
+        self._sel_from = self._sel_to = None
+        self._selected_item = None
+        self._apply_size()
+        self._commit_change(before)
+        return True
 
     def clear(self):
         """Clear the canvas (back to the no-screenshot state)."""
+        if self.base is None and not self.items:
+            return
+        before = self._content_state()
         self.base = None
         self.items.clear()
         self.cur = None
         self._word_boxes = []
         self._sel_from = self._sel_to = None
+        self._selected_item = None
+        self._commit_change(before)
         self.setMinimumSize(0, 0)
+        self.setMaximumSize(QtWidgets.QWIDGETSIZE_MAX, QtWidgets.QWIDGETSIZE_MAX)
         self.resize(self.parent().size() if self.parent() else QtCore.QSize(400, 300))
-        self.update()
 
     def render_flattened(self):
         """Return a QImage with annotations baked in (1:1 pixels)."""
@@ -1759,6 +1983,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
             self._draw_item(p, it)
         if self.cur:
             self._draw_item(p, self.cur)
+        if (self.tool == "select" and self._valid_selection()):
+            self._draw_selection(p, self.items[self._selected_item])
         # picktext: cyan highlight under the words the user is dragging over
         if self.tool == "picktext" and self._sel_from is not None:
             p.setPen(Qt.NoPen)
@@ -1779,7 +2005,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
         elif t == "line":
             p.drawLine(it["a"], it["b"])
         elif t == "arrow":
-            self._draw_arrow(p, it["a"], it["b"])
+            self._draw_arrow(p, it["a"], it["b"], it["width"])
         elif t == "pen":
             if len(it["pts"]) > 1:
                 p.drawPolyline(QtGui.QPolygonF(it["pts"]))
@@ -1862,15 +2088,96 @@ class AnnotateCanvas(QtWidgets.QWidget):
         p.setPen(QtGui.QPen(it["color"], max(2, it["width"])))
         p.drawEllipse(c, rad, rad)
 
-    def _draw_arrow(self, p, a, b):
+    def _draw_arrow(self, p, a, b, width=None):
+        p.drawPath(self._arrow_path(a, b, self.width if width is None else width))
+
+    @staticmethod
+    def _arrow_path(a, b, width):
         import math
-        p.drawLine(a, b)
-        ang = math.atan2(b.y() - a.y(), b.x() - a.x())
-        size = 8 + self.width * 2
-        for da in (math.radians(150), math.radians(-150)):
-            x = b.x() + size * math.cos(ang + da)
-            y = b.y() + size * math.sin(ang + da)
-            p.drawLine(b, QtCore.QPointF(x, y))
+        path = QtGui.QPainterPath(a)
+        path.lineTo(b)
+        angle = math.atan2(b.y() - a.y(), b.x() - a.x())
+        size = 8 + width * 2
+        for delta in (math.radians(150), math.radians(-150)):
+            point = QtCore.QPointF(
+                b.x() + size * math.cos(angle + delta),
+                b.y() + size * math.sin(angle + delta))
+            path.moveTo(b)
+            path.lineTo(point)
+        return path
+
+    @staticmethod
+    def _translate_item(item, delta):
+        if not isinstance(item, dict):
+            return
+        for key in ("a", "b"):
+            if isinstance(item.get(key), QtCore.QPointF):
+                item[key] = item[key] + delta
+        if "pts" in item:
+            item["pts"] = [point + delta for point in item["pts"]]
+
+    def _item_path(self, item):
+        path = QtGui.QPainterPath()
+        kind = item.get("type")
+        a, b = item.get("a"), item.get("b")
+        if kind == "rect":
+            path.addRect(QtCore.QRectF(a, b).normalized())
+        elif kind == "ellipse":
+            path.addEllipse(QtCore.QRectF(a, b).normalized())
+        elif kind == "line":
+            path.moveTo(a)
+            path.lineTo(b)
+        elif kind == "arrow":
+            path = self._arrow_path(a, b, item.get("width", self.width))
+        elif kind == "pen":
+            points = item.get("pts", [])
+            if points:
+                path.moveTo(points[0])
+                for point in points[1:]:
+                    path.lineTo(point)
+        elif kind == "text":
+            font = QtGui.QFont(self.font())
+            font.setPixelSize(max(12, item.get("width", self.width) * 6))
+            path.addText(a, font, item.get("text", ""))
+        elif kind in ("highlight", "blur"):
+            path.addRect(QtCore.QRectF(a, b).normalized())
+        elif kind == "number":
+            radius = max(12.0, item.get("width", self.width) * 4.0)
+            path.addEllipse(a, radius, radius)
+        elif kind == "magnify":
+            import math
+            radius = math.hypot(b.x() - a.x(), b.y() - a.y())
+            path.addEllipse(a, radius, radius)
+        return path
+
+    def _item_hit(self, item, point):
+        path = self._item_path(item)
+        if path.isEmpty():
+            return False
+        if item.get("type") in ("highlight", "blur", "number", "magnify"):
+            if path.contains(point):
+                return True
+        stroker = QtGui.QPainterPathStroker()
+        stroker.setWidth(max(8.0, float(item.get("width", self.width)) + 6.0))
+        return stroker.createStroke(path).contains(point)
+
+    def _item_at(self, point):
+        for index in range(len(self.items) - 1, -1, -1):
+            item = self.items[index]
+            if isinstance(item, dict) and self._item_hit(item, point):
+                return index
+        return None
+
+    def _draw_selection(self, painter, item):
+        path = self._item_path(item)
+        if path.isEmpty():
+            return
+        painter.save()
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QtGui.QPen(QtGui.QColor(0, 200, 255), 2,
+                                  Qt.DashLine, Qt.RoundCap, Qt.RoundJoin))
+        painter.drawPath(path)
+        painter.restore()
 
     # --- Mouse interaction --- #
     def _word_at(self, img_pt):
@@ -1896,21 +2203,33 @@ class AnnotateCanvas(QtWidgets.QWidget):
             self._sel_from = self._sel_to = self._word_at(pt)
             self.update()
             return
+        if self.tool == "select":
+            self._selected_item = self._item_at(pt)
+            self._drag_start = pt if self._selected_item is not None else None
+            self._drag_item = (self._copy_item(self.items[self._selected_item])
+                               if self._selected_item is not None else None)
+            self._drag_before = self._content_state() if self._selected_item is not None else None
+            self._drag_moved = False
+            self.update()
+            return
         if self.tool == "text":
-            txt, ok = QtWidgets.QInputDialog.getText(self, "Add text", "Text:")
+            txt, ok = ungrabbed_dialog(QtWidgets.QInputDialog.getText, self, "Add text", "Text:",
+                flags=self._text_dialog_flags())
             if ok and txt:
+                before = self._content_state()
                 self.items.append({"type": "text", "a": pt, "text": txt,
                                    "color": QtGui.QColor(self.color),
                                    "width": self.width})
-                self.update()
+                self._commit_change(before)
             return
         if self.tool == "number":
             n = 1 + max([it["n"] for it in self.items
                          if it["type"] == "number"], default=0)
+            before = self._content_state()
             self.items.append({"type": "number", "a": pt, "n": n,
                                "color": QtGui.QColor(self.color),
                                "width": self.width})
-            self.update()
+            self._commit_change(before)
             return
         base = {"color": QtGui.QColor(self.color), "width": self.width}
         if self.tool == "pen":
@@ -1933,6 +2252,17 @@ class AnnotateCanvas(QtWidgets.QWidget):
             if self.cursor().shape() != want:
                 self.setCursor(want)
             return
+        if self.tool == "select":
+            if (e.buttons() & Qt.LeftButton and self._drag_start is not None
+                    and self._selected_item is not None):
+                pt = self._to_img(e.pos())
+                delta = pt - self._drag_start
+                item = self._copy_item(self._drag_item)
+                self._translate_item(item, delta)
+                self.items[self._selected_item] = item
+                self._drag_moved = not delta.isNull()
+                self.update()
+            return
         if self.cur is None:
             return
         pt = self._to_img(e.pos())
@@ -1950,6 +2280,12 @@ class AnnotateCanvas(QtWidgets.QWidget):
             if words:
                 self.textSelected.emit(" ".join(words))
             return
+        if self.tool == "select":
+            if self._drag_moved and self._drag_before is not None:
+                self._commit_change(self._drag_before)
+            self._drag_start = self._drag_item = self._drag_before = None
+            self._drag_moved = False
+            return
         if self.cur is None:
             return
         if self.cur["type"] == "crop":
@@ -1960,14 +2296,268 @@ class AnnotateCanvas(QtWidgets.QWidget):
             else:
                 self.update()
             return
+        before = self._content_state()
         self.items.append(self.cur)
         self.cur = None
-        self.update()
+        self._commit_change(before)
+
+    def _text_dialog_flags(self):
+        # Xorg keeps override-redirect capture windows above WM-managed dialogs.
+        # Match that stacking layer so the text prompt remains visible.
+        flags = Qt.Dialog
+        if self.window().windowFlags() & Qt.X11BypassWindowManagerHint:
+            flags |= Qt.X11BypassWindowManagerHint | Qt.WindowStaysOnTopHint
+        return flags
+
+    def mouseDoubleClickEvent(self, e):
+        if self.base is None or self.tool != "select":
+            return
+        index = self._item_at(self._to_img(e.pos()))
+        if index is None or self.items[index].get("type") != "text":
+            return
+        self._selected_item = index
+        item = self.items[index]
+        text, ok = ungrabbed_dialog(QtWidgets.QInputDialog.getText,
+            self, "Edit text", "Text:", QtWidgets.QLineEdit.Normal, item.get("text", ""), flags=self._text_dialog_flags())
+        if ok and text != item.get("text", ""):
+            before = self._content_state()
+            item["text"] = text
+            self._commit_change(before)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            if self.delete_selected():
+                e.accept()
+                return
+        if e.key() == Qt.Key_Escape and self._selected_item is not None:
+            self._selected_item = None
+            self.update()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
 
 # --------------------------------------------------------------------------- #
 # Floating thumbnail shown after a capture (bottom-left)
 # --------------------------------------------------------------------------- #
+class EditTools(QtWidgets.QFrame):
+    """Shared controls for the existing canvas in pins and capture-time editing."""
+    _retired = set()
+
+    def __init__(self, canvas, parent=None):
+        super().__init__(parent)
+        self._closing = False
+        self.canvas = canvas
+        self._workers = []
+        self._generation = 0
+        self.setObjectName('editTools')
+        self.setStyleSheet('#editTools{background:#24242c;border:1px solid #626273;border-radius:6px;}'
+                           'QToolButton,QPushButton{color:#eeeeef;background:#30303a;padding:4px;}'
+                           'QToolButton:checked{background:#6656d9;} QLabel{color:#eeeeef;}')
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(6, 5, 6, 5)
+        layout.setSpacing(4)
+        row = QtWidgets.QHBoxLayout(); row.setSpacing(2); layout.addLayout(row)
+        self.buttons = {}
+        self.group = QtWidgets.QButtonGroup(self)
+        for name in ('select', 'picktext', 'rect', 'ellipse', 'arrow', 'pen',
+                     'text', 'number', 'highlight', 'blur', 'crop'):
+            button = QtWidgets.QToolButton()
+            button.setIcon(line_icon(name))
+            button.setIconSize(QtCore.QSize(20, 20))
+            button.setToolTip(t('a_' + name))
+            button.setCheckable(True)
+            button.setFixedSize(30, 30)
+            button.clicked.connect(lambda _, n=name: self.set_tool(n))
+            self.group.addButton(button); row.addWidget(button)
+            self.buttons[name] = button
+        self.color = QtWidgets.QToolButton(); self.color.setIcon(swatch_icon(canvas.color))
+        self.color.setToolTip(t('dlg_pickcolor')); self.color.clicked.connect(self.choose_color)
+        row.addWidget(self.color)
+        self.line_width = QtWidgets.QSpinBox(); self.line_width.setRange(1,30)
+        self.line_width.setValue(canvas.width); self.line_width.setFixedWidth(48)
+        self.line_width.valueChanged.connect(canvas.set_width); row.addWidget(self.line_width)
+        self.actions = QtWidgets.QHBoxLayout(); self.actions.setSpacing(4)
+        layout.addLayout(self.actions)
+        self.action_button('undo', t('a_undo'), canvas.undo)
+        self.action_button('redo', t('a_redo'), canvas.redo)
+        self.action_button('clear', t('a_clear'), canvas.clear_items)
+        self.note = QtWidgets.QLabel(t('edit_hint'))
+        self.note.setWordWrap(True); self.note.setMaximumWidth(460)
+        layout.addWidget(self.note)
+        canvas.picktextNeedsWords.connect(self.recognize)
+        canvas.textSelected.connect(self.copy_words)
+        canvas.cropRequested.connect(canvas.crop_image)
+        canvas.changed.connect(self.invalidate_words)
+        self.set_tool('arrow')
+        self._shortcuts = []
+        for key, action in [('Ctrl+Z', canvas.undo), ('Ctrl+Shift+Z',canvas.redo),
+                            ('Ctrl+Y',canvas.redo), ('Delete',canvas.delete_selected)]:
+            shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(key), parent or self)
+            shortcut.activated.connect(action); self._shortcuts.append(shortcut)
+
+    def action_button(self, icon, label, action):
+        button = QtWidgets.QToolButton()
+        button.setIcon(line_icon(icon)); button.setToolTip(label)
+        button.setFixedSize(30,30); button.clicked.connect(action)
+        self.actions.addWidget(button)
+        return button
+
+    def set_tool(self, name):
+        self.canvas.set_tool(name)
+        self.buttons[name].setChecked(True)
+        if name == 'picktext' and not self.canvas._word_boxes:
+            self.recognize()
+
+    def choose_color(self):
+        color = ungrabbed_dialog(QtWidgets.QColorDialog.getColor, self.canvas.color, self)
+        if color.isValid():
+            self.canvas.set_color(color); self.color.setIcon(swatch_icon(color))
+
+    def invalidate_words(self):
+        self._generation += 1
+        self.canvas.set_word_boxes([])
+
+    def recognize(self):
+        if self._workers or self.canvas.base is None:
+            return
+        self.note.setText(t('st_ocr_running'))
+        settings = QtCore.QSettings('ScrollShot','ScrollShot')
+        generation = self._generation
+        worker = OCRWorker(qimage_to_bgr(self.canvas.render_flattened()),
+                           settings.value('ocr_lang','chi_sim+eng'),
+                           int(settings.value('ocr_psm',6)),
+                           settings.value('ocr_enhance', True, type=bool), True, self)
+        self._workers.append(worker)
+        worker.wordsReady.connect(lambda words: self._words_ready(generation, words))
+        worker.result.connect(lambda text, error: self._result(generation, text, error))
+        worker.finished.connect(lambda: self._release(worker))
+        worker.start()
+
+    def _words_ready(self, generation, words):
+        if generation == self._generation:
+            self.canvas.set_word_boxes(words)
+
+    def _result(self, generation, text, error):
+        if generation == self._generation:
+            self.note.setText(error or (t('select_words_hint') if text.strip() else t('st_ocr_none')))
+
+    def _release(self, worker):
+        self._workers.remove(worker); worker.deleteLater()
+        if self._closing and not self._workers:
+            window = self.window()
+            self._retired.discard(window)
+            window.deleteLater()
+
+    def retire(self):
+        self._closing = True
+        self._generation += 1
+        if self._workers:
+            self._retired.add(self.window())
+            for worker in self._workers:
+                worker.requestInterruption()
+        else:
+            self.window().deleteLater()
+
+    def copy_words(self, text):
+        QtWidgets.QApplication.clipboard().setText(text)
+        self.note.setText(t('st_copied'))
+
+
+class InlineCaptureEditor(QtWidgets.QWidget):
+    """Edit the selected image on the desktop before committing any output."""
+    dismissed = pyqtSignal()
+
+    def __init__(self, image, region, on_finish, parent=None):
+        super().__init__(parent, Qt.Window | Qt.FramelessWindowHint |
+                         Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._on_finish = on_finish
+        self._confirmed = False
+        screen = QtWidgets.QApplication.screenAt(region.center()) if region else None
+        screen = screen or QtWidgets.QApplication.primaryScreen()
+        bounds = screen.geometry()
+        self.setGeometry(bounds)
+        self.canvas = AnnotateCanvas()
+        self.canvas.set_image_bgr(image)
+        self.viewport = QtWidgets.QScrollArea(self)
+        self.viewport.setWidget(self.canvas)
+        self.viewport.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.viewport.setStyleSheet('QScrollArea{background:#202026;}')
+        self.tools = EditTools(self.canvas, self)
+        for icon,label,action in [('copy',t('card_copy'),'copy'),('save',t('card_save'),'save'),
+                                  ('pin',t('card_pin'),'pin'),('pen',t('open_editor'),'editor')]:
+            self.tools.action_button(icon,label,lambda _,a=action:self.finish(a))
+        self.tools.action_button('close',t('card_close'),self.close)
+        self.tools.adjustSize()
+        self._region = region
+        self.canvas.changed.connect(self._fit_canvas)
+        self._fit_canvas()
+        for key, action in [('Escape',self.close),('Return',lambda:self.finish('copy')),
+                            ('Ctrl+C',lambda:self.finish('copy')),
+                            ('Ctrl+S',lambda:self.finish('save'))]:
+            shortcut=QtWidgets.QShortcut(QtGui.QKeySequence(key),self)
+            shortcut.activated.connect(action)
+        QtWidgets.QApplication.instance().focusChanged.connect(self._focus_changed)
+        self.show(); self.raise_(); self.activateWindow(); self.setFocus()
+
+    def _focus_changed(self, old, current):
+        if self.isVisible() and current is not None and self.isAncestorOf(current) and current.window() is self:
+            current.grabKeyboard()
+
+    def _release_keyboard(self):
+        grabber = QtWidgets.QWidget.keyboardGrabber()
+        if grabber is self or (grabber is not None and self.isAncestorOf(grabber)):
+            grabber.releaseKeyboard()
+
+    def _fit_canvas(self):
+        if self.canvas.base is None:
+            return
+        bounds=self.geometry()
+        area=self._region or QRect(bounds.center()-QtCore.QPoint(320,200),QtCore.QSize(640,400))
+        area=area.intersected(bounds).translated(-bounds.topLeft())
+        width=min(max(80,area.width()),max(80,self.width()-20))
+        height=min(max(60,area.height()),max(60,self.height()-self.tools.height()-24))
+        x=max(10,min(area.x(),self.width()-width-10))
+        y=max(10,min(area.y(),self.height()-height-10))
+        self.viewport.setGeometry(x,y,width,height)
+        self.canvas.fit_width(width)
+        # Reserve space for a scrollbar when a long image exceeds the viewport.
+        if self.canvas.height()>height:
+            self.canvas.fit_width(width-self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent))
+        tx=max(4,min(x+width-self.tools.width(),self.width()-self.tools.width()-4))
+        ty=y+height+6
+        if ty+self.tools.height()>self.height()-4:
+            ty=max(4,y-self.tools.height()-6)
+        self.tools.move(tx,ty); self.tools.raise_()
+
+    def paintEvent(self, event):
+        painter=QtGui.QPainter(self)
+        painter.fillRect(self.rect(),QtGui.QColor(0,0,0,110))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.grabKeyboard()
+
+    def finish(self, action):
+        if self._confirmed:
+            return
+        # Release the X11 keyboard grab before any native save dialog is opened.
+        self._release_keyboard()
+        if self._on_finish(action,self.canvas):
+            self._confirmed=True
+            self.close()
+        elif self.isVisible():
+            self.grabKeyboard()
+
+    def closeEvent(self, event):
+        self._release_keyboard()
+        self.dismissed.emit()
+        self.tools.retire()
+        event.accept()
+
+
 class FloatingThumbnail(QtWidgets.QWidget):
     """A small thumbnail floating at the bottom-left after a capture: drag it elsewhere, click to edit, copy/save/pin.
 
@@ -2122,13 +2712,16 @@ class PinnedImage(QtWidgets.QWidget):
     (copy / OCR / click-through / reset opacity)."""
     _pins = []                                  # hold references to prevent GC
 
-    def __init__(self, qimage, on_ocr=None):
+    def __init__(self, qimage, on_ocr=None, on_edit=None):
         super().__init__()
         PinnedImage._pins.append(self)
         self._orig = QtGui.QPixmap.fromImage(qimage)
         self._scale = 1.0
         self._drag_off = None
         self._on_ocr = on_ocr                   # callback(BGR numpy), MainWindow._pin_ocr
+        self._on_edit = on_edit
+        self._editing = False
+        self.tools = None
         self._opacity = 1.0
         self._click_through = False
 
@@ -2143,6 +2736,11 @@ class PinnedImage(QtWidgets.QWidget):
                               maxh / self._orig.height())
         self._lbl = QtWidgets.QLabel(self)
         self._lbl.setStyleSheet("border:1px solid #0a84ff;")
+        self.canvas = AnnotateCanvas()
+        self.canvas.setParent(self)
+        self.canvas.set_image_bgr(qimage_to_bgr(qimage))
+        self.canvas.hide()
+        self.canvas.changed.connect(self._document_changed)
         self._apply()
         self.move(sg.center().x() - self.width() // 2,
                   sg.center().y() - self.height() // 2)
@@ -2158,6 +2756,8 @@ class PinnedImage(QtWidgets.QWidget):
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
             self.close()
+        elif e.key() == Qt.Key_E:
+            self.set_editing(not self._editing)
         elif e.key() == Qt.Key_O and self._on_ocr is not None:
             self._do_ocr()
         else:
@@ -2185,6 +2785,43 @@ class PinnedImage(QtWidgets.QWidget):
         except Exception:                       # noqa: BLE001
             pass
 
+    def _document_changed(self):
+        self._orig = QtGui.QPixmap.fromImage(self.canvas.render_flattened())
+        self._apply()
+
+    def set_editing(self, editing=True, tool='select'):
+        self._editing = editing
+        if editing and self.tools is None:
+            self.tools = EditTools(self.canvas, self)
+            self.tools.note.setText(t('pin_edit_hint'))
+            self.tools.action_button('copy',t('card_copy'),self._copy_image)
+            self.tools.action_button('save',t('card_save'),self._save_image)
+            if self._on_edit:
+                self.tools.action_button('pen',t('open_editor'),self._open_in_editor)
+            self.tools.action_button('close',t('finish_edit'),lambda:self.set_editing(False))
+            self.tools.adjustSize()
+        self._lbl.setVisible(not editing)
+        self.canvas.setVisible(editing)
+        if self.tools:
+            self.tools.setVisible(editing)
+            for shortcut in self.tools._shortcuts:
+                shortcut.setEnabled(editing)
+            if editing:
+                self.tools.set_tool(tool)
+        self._apply()
+
+    def _copy_image(self):
+        QtWidgets.QApplication.clipboard().setImage(self.canvas.render_flattened())
+
+    def _save_image(self):
+        path,_=QtWidgets.QFileDialog.getSaveFileName(self,t('dlg_save'),'Kapture.png','PNG (*.png);;JPEG (*.jpg)')
+        if path and not self.canvas.render_flattened().save(path):
+            QtWidgets.QMessageBox.warning(self,t('dlg_save'),t('save_failed'))
+
+    def _open_in_editor(self):
+        if self._on_edit:
+            self._on_edit(self.canvas.snapshot_document())
+
     def _apply(self):
         pix = self._orig.scaled(
             max(1, int(self._orig.width() * self._scale)),
@@ -2192,7 +2829,15 @@ class PinnedImage(QtWidgets.QWidget):
             Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._lbl.setPixmap(pix)
         self._lbl.resize(pix.size())
-        self.resize(pix.size())
+        if self._editing:
+            self.canvas.scale = self._scale
+            self.canvas._apply_size()
+            self.canvas.move(0,0)
+            self.tools.move(0,self.canvas.height())
+            self.resize(max(self.canvas.size().width(),self.tools.width()),
+                        self.canvas.height()+self.tools.height())
+        else:
+            self.resize(pix.size())
 
     def wheelEvent(self, e):
         if e.modifiers() & Qt.ControlModifier:
@@ -2203,6 +2848,8 @@ class PinnedImage(QtWidgets.QWidget):
         self._apply()
 
     def mousePressEvent(self, e):
+        if self._editing:
+            return
         if e.button() == Qt.LeftButton:
             self._drag_off = e.globalPos() - self.frameGeometry().topLeft()
             self.setCursor(Qt.ClosedHandCursor)
@@ -2216,12 +2863,17 @@ class PinnedImage(QtWidgets.QWidget):
         self.setCursor(Qt.OpenHandCursor)
 
     def mouseDoubleClickEvent(self, e):
-        self.close()
+        if not self._editing:
+            self.close()
 
     def _build_menu(self):
         m = QtWidgets.QMenu(self)
-        m.addAction(t("card_copy"), lambda: QtWidgets.QApplication.clipboard()
-                    .setImage(self._orig.toImage()))
+        m.addAction(t('pin_edit'),lambda:self.set_editing(not self._editing))
+        m.addAction(t('pin_select_text'),lambda:self.set_editing(True,'picktext'))
+        m.addAction(t('card_copy'),self._copy_image)
+        m.addAction(t('card_save'),self._save_image)
+        if self._on_edit:
+            m.addAction(t('open_editor'),self._open_in_editor)
         if self._on_ocr is not None:
             m.addAction(t("p_ocr"), self._do_ocr)
         m.addAction(t("p_clickthrough"), lambda: self._toggle_click_through(True))
@@ -2235,6 +2887,10 @@ class PinnedImage(QtWidgets.QWidget):
     def closeEvent(self, e):
         if self in PinnedImage._pins:
             PinnedImage._pins.remove(self)
+        if self.tools:
+            self.tools.retire()
+        else:
+            self.deleteLater()
         e.accept()
 
 
@@ -2370,13 +3026,18 @@ class OCRWorker(QThread):
         self.psm = psm
         self.enhance = enhance
         self.automatic = automatic
+        QtWidgets.QApplication.instance().aboutToQuit.connect(self._stop_for_exit)
+
+    def _stop_for_exit(self):
+        self.requestInterruption()
+        self.wait()
 
     def _word_boxes(self, pil, upscale):
         """Per-word boxes via Tesseract's TSV data, mapped back to image coords."""
         import pytesseract
         try:
             data = pytesseract.image_to_data(pil, lang=self.lang,
-                                             config=f"--psm {self.psm}",
+                                             config=f"--psm {self.psm}", timeout=20,
                                              output_type=pytesseract.Output.DICT)
         except Exception:
             return []
@@ -2408,7 +3069,7 @@ class OCRWorker(QThread):
                 upscale = 1.0
             config = f"--oem 1 --psm {self.psm} -c preserve_interword_spaces=1 --dpi 150"
             txt = pytesseract.image_to_string(
-                pil, lang=self.lang, config=config, timeout=20 if self.automatic else 0)
+                pil, lang=self.lang, config=config, timeout=20)
         except pytesseract.TesseractNotFoundError:
             self.result.emit("", "tesseract not found; run: apt install tesseract-ocr")
             return
@@ -2418,6 +3079,8 @@ class OCRWorker(QThread):
         if "chi" in self.lang:
             txt = _strip_cjk_spaces(txt)
         self.result.emit(txt, "")
+        if self.isInterruptionRequested():
+            return
         try:
             words = self._word_boxes(pil, upscale)
             if words:
@@ -2443,8 +3106,16 @@ class MainWindow(QtWidgets.QWidget):
         self.settings = QtCore.QSettings("ScrollShot", "ScrollShot")
         set_lang(self.settings.value("ui_lang", "zh"))      # apply the UI language
         write_desktop_entry()                               # launcher name follows the language
-        self.history = []            # recent screenshots [(QImage, description)]
-        self._clip_images = []       # system-clipboard image history, newest first (max 10)
+        from pathlib import Path
+        self._history_store = ImageHistoryStore(Path(self.settings.fileName()).parent / 'history')
+        self.history, self._clip_images = self._history_store.load()
+        self._clip_images = [im.convertToFormat(QtGui.QImage.Format_ARGB32) for im in self._clip_images]
+        self._history_writer = HistoryWriter(self._history_store)
+        self._pending_history = {}
+        QtWidgets.QApplication.instance().aboutToQuit.connect(self._history_writer.shutdown)
+        self._inline_editor = None
+        self._capture_rect = None
+        self._canvas_base_key = None
         QtWidgets.QApplication.clipboard().dataChanged.connect(self._on_clipboard_changed)
         self._recorder = None        # screen recorder
         self._ocr_workers = []
@@ -2456,6 +3127,12 @@ class MainWindow(QtWidgets.QWidget):
         self._apply_style()
         self._setup_tray()
         self._retranslate()
+        self.canvas.changed.connect(self._canvas_changed)
+        self._history_writer.error.connect(self._history_error)
+        self._history_writer.cleared.connect(self._history_cleared)
+        self._history_writer.clear_failed.connect(self._history_clear_failed)
+        if self._history_store.errors:
+            self.status.setText(self._history_store.errors[-1])
 
     def _tbtn(self, icon, tip, checkable=False):
         b = QtWidgets.QToolButton()
@@ -2535,7 +3212,7 @@ class MainWindow(QtWidgets.QWidget):
         card_layout.addLayout(tools)
         self.tool_group = QtWidgets.QButtonGroup(self)
         self._tool_btns = {}
-        for name in ["picktext", "rect", "ellipse", "arrow", "line", "pen",
+        for name in ["picktext", "select", "rect", "ellipse", "arrow", "line", "pen",
                      "text", "number", "highlight", "blur", "magnify", "crop"]:
             b = self._tbtn(name, "", checkable=True)
             b.clicked.connect(lambda _, n=name: self.canvas.set_tool(n))
@@ -2562,7 +3239,9 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_clear.clicked.connect(lambda: self.canvas.clear_items())
         tools.addStretch(1)
         tools.addWidget(self._vsep())
-        tools.addWidget(self.btn_undo); tools.addWidget(self.btn_clear)
+        self.btn_redo = self._tbtn('redo',t('a_redo'))
+        self.btn_redo.clicked.connect(self._redo_current_context)
+        tools.addWidget(self.btn_undo); tools.addWidget(self.btn_redo); tools.addWidget(self.btn_clear)
 
         divider = QtWidgets.QFrame()
         divider.setObjectName("toolbarDivider")
@@ -2672,6 +3351,11 @@ class MainWindow(QtWidgets.QWidget):
         self._undo_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence.Undo, self)
         self._undo_shortcut.setContext(Qt.WindowShortcut)
         self._undo_shortcut.activated.connect(self._undo_current_context)
+        self._redo_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+Shift+Z'),self)
+        self._redo_shortcut.activated.connect(self._redo_current_context)
+        self._delete_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence('Delete'),self.canvas)
+        self._delete_shortcut.setContext(Qt.WidgetShortcut)
+        self._delete_shortcut.activated.connect(self.canvas.delete_selected)
 
     def _undo_current_context(self):
         focus = QtWidgets.QApplication.focusWidget()
@@ -2679,6 +3363,40 @@ class MainWindow(QtWidgets.QWidget):
             self.text.undo()
         else:
             self.canvas.undo()
+
+    def _redo_current_context(self):
+        if self.text.hasFocus():
+            self.text.redo()
+        else:
+            self.canvas.redo()
+
+    def _canvas_changed(self):
+        if self.canvas.base is None:
+            return
+        key = self.canvas.base.cacheKey()
+        if key != self._canvas_base_key:
+            self.image_bgr = qimage_to_bgr(self.canvas.base)
+            self._canvas_base_key = key
+            self._ocr_serial += 1
+            self._ocr_pending = None
+            self.text.clear()
+
+    def _load_document(self, state, show=True):
+        self._ocr_serial += 1
+        self._ocr_pending = None
+        self.text.clear()
+        self.image_bgr = qimage_to_bgr(state['base'])
+        self.canvas.restore_document(state)
+        self.canvas.fit_width(self.scroll.viewport().width())
+        self._ocr_image_shown = True
+        if show:
+            self._bring_to_front()
+
+    def _new_pin(self, qimage, state=None):
+        pin = PinnedImage(qimage, on_ocr=self._pin_ocr, on_edit=self._load_document)
+        if state is not None:
+            pin.canvas.restore_document(state)
+        return pin
 
     def _retranslate(self):
         """Refresh the main UI text according to the current language (called when switching languages)."""
@@ -2690,7 +3408,7 @@ class MainWindow(QtWidgets.QWidget):
             self.btn_record: "cap_record", self.btn_colorpick: "cap_color",
             self.btn_repeat: "cap_repeat", self.btn_history: "t_history",
             self.btn_settings: "t_settings", self.btn_color: "a_color",
-            self.btn_undo: "a_undo", self.btn_clear: "a_clear",
+            self.btn_undo: "a_undo", self.btn_redo: "a_redo", self.btn_clear: "a_clear",
             self.btn_ocr: "e_ocr", self.btn_copy: "e_copy", self.btn_pin: "e_pin",
             self.btn_beautify: "e_beautify", self.btn_save: "e_save",
         }
@@ -2877,8 +3595,16 @@ class MainWindow(QtWidgets.QWidget):
         # request once the restore has been processed.
         QtCore.QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
 
+    def _unfinished_capture(self):
+        if self._inline_editor is not None and self._inline_editor.isVisible():
+            self._inline_editor.tools.note.setText(t('finish_capture_first'))
+            return True
+        return False
+
     def handle_command(self, cmd):
         """Single-instance command dispatch: sent from this process or a later-launched process."""
+        if self._unfinished_capture() and not (cmd == 'record' and self._recorder is not None):
+            return
         if cmd == "background":
             self.hide()
         elif cmd in ("single", "manual", "scroll", "textgrab"):
@@ -2904,6 +3630,9 @@ class MainWindow(QtWidgets.QWidget):
         if self.worker is not None and self.worker.isRunning():
             self.status.setText("Stop the current scrolling capture with Esc first")
             return
+        if self._unfinished_capture():
+            return
+        self._capture_rect = None
         self._mode = mode
         self.showMinimized()
         QtCore.QTimer.singleShot(250, self._show_selector)
@@ -2921,6 +3650,7 @@ class MainWindow(QtWidgets.QWidget):
         self.activateWindow()
 
     def _on_region(self, gr: QRect, frozen=None):
+        self._capture_rect = QRect(gr)
         dpr = QtWidgets.QApplication.primaryScreen().devicePixelRatio()
         phys = (int(gr.left() * dpr), int(gr.top() * dpr),
                 int(gr.width() * dpr), int(gr.height() * dpr))
@@ -3028,6 +3758,8 @@ class MainWindow(QtWidgets.QWidget):
 
     # --- window capture --- #
     def capture_window(self):
+        if self._unfinished_capture():
+            return
         self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
@@ -3049,16 +3781,22 @@ class MainWindow(QtWidgets.QWidget):
             return
         x, y, w, h = geom
         self._last_phys = geom
+        dpr=QtWidgets.QApplication.primaryScreen().devicePixelRatio()
+        self._capture_rect=QRect(int(x/dpr),int(y/dpr),int(w/dpr),int(h/dpr))
         self._grab_with_delay(
             lambda: self._present_capture(
                 grab_region(x, y, w, h), f"Window captured: {w}×{h} px"))
 
     # --- repeat last area --- #
     def repeat_last(self):
+        if self._unfinished_capture():
+            return
         if not getattr(self, "_last_phys", None):
             self.status.setText("No previous area yet")
             return
         phys = self._last_phys
+        dpr=QtWidgets.QApplication.primaryScreen().devicePixelRatio()
+        self._capture_rect=QRect(*(int(v/dpr) for v in phys))
         self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
@@ -3067,6 +3805,8 @@ class MainWindow(QtWidgets.QWidget):
 
     # --- screen color picker --- #
     def pick_color_screen(self):
+        if self._unfinished_capture():
+            return
         self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
@@ -3202,6 +3942,47 @@ class MainWindow(QtWidgets.QWidget):
 
     # --- after capture: copy to clipboard by default + bottom-left floating thumbnail --- #
     def _present_capture(self, img, status):
+        if self._unfinished_capture():
+            return
+        if self.settings.value('inline_edit',True,type=bool) and not self.settings.value('open_editor',False,type=bool):
+            if self._inline_editor is not None:
+                self._inline_editor.close()
+            if getattr(self,'_thumb',None):
+                self._thumb.close()
+            self.hide()
+            self._inline_editor = InlineCaptureEditor(img,self._capture_rect,
+                lambda action,canvas:self._finish_inline(action,canvas,status),self)
+            self._inline_editor.dismissed.connect(self._inline_closed)
+            return
+        self._commit_capture(img,status)
+
+    def _inline_closed(self):
+        self._inline_editor = None
+
+    def _finish_inline(self, action, canvas, status):
+        image=canvas.render_flattened()
+        if action == 'save':
+            path,_=QtWidgets.QFileDialog.getSaveFileName(self._inline_editor,t('dlg_save'),
+                                                       self._make_filename(),'PNG (*.png);;JPEG (*.jpg)')
+            if not path:
+                return False
+            if not image.save(path):
+                self._inline_editor.tools.note.setText(t('save_failed'))
+                return False
+        state=canvas.snapshot_document()
+        self._add_history(image,status)
+        if action == 'copy' or self.settings.value('auto_copy',True,type=bool):
+            QtWidgets.QApplication.clipboard().setImage(image)
+        if action != 'save' and self.settings.value('auto_save',False,type=bool):
+            self._auto_save(qimage_to_bgr(image))
+        self._load_document(state,show=action == 'editor')
+        if action == 'pin':
+            self._new_pin(image,state)
+        if action == 'editor' and self.settings.value('auto_ocr',True,type=bool):
+            self.run_ocr(copy_result=False)
+        return True
+
+    def _commit_capture(self, img, status):
         self._ocr_serial += 1          # an older OCR result must not replace this capture
         self._add_history(bgr_to_qimage(img), status)
         # default behavior: copy image to clipboard (auto_copy on by default)
@@ -3222,8 +4003,10 @@ class MainWindow(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(0, lambda captured=img: self._auto_ocr_for(captured))
 
     def _add_history(self, qimg, desc):
-        self.history.insert(0, (qimg, desc))
-        del self.history[30:]                # keep at most 30
+        history = self._pending_history.get('screenshots', self.history)
+        history.insert(0, (qimg, desc))
+        history[:] = self._history_store.bounded_entries('screenshots', history)
+        self._history_writer.submit_screenshots(history)
 
     # --- system-clipboard image history: source for Ctrl+1 / Ctrl+2 pin ---- #
     def _on_clipboard_changed(self):
@@ -3231,20 +4014,22 @@ class MainWindow(QtWidgets.QWidget):
         mime = QtWidgets.QApplication.clipboard().mimeData()
         if not mime.hasImage():
             return
-        qimg = QtGui.QImage(mime.imageData())
+        qimg = QtGui.QImage(mime.imageData()).convertToFormat(QtGui.QImage.Format_ARGB32)
         if qimg.isNull():
             return
-        if self._clip_images and self._clip_images[0] == qimg:
-            return                               # same image re-signalled, not a new copy
-        self._clip_images.insert(0, qimg)
-        del self._clip_images[10:]               # keep at most 10
+        images = self._pending_history.get('clipboard', self._clip_images)
+        if images and images[0] == qimg:
+            return
+        images.insert(0, qimg)
+        images[:] = self._history_store.bounded_entries('clipboard', images)
+        self._history_writer.submit_clipboard(images)
 
     def _pin_from_clipboard(self, index):
         """Pin clipboard-history image at index (0 = current, 1 = previous). No-op if missing."""
         if index >= len(self._clip_images):
             self.status.setText(t("st_no_clip_img"))
             return
-        PinnedImage(self._clip_images[index], on_ocr=self._pin_ocr)
+        self._new_pin(self._clip_images[index])
         self.status.setText(t("st_pinned_clip"))
 
     def _ensure_default_shortcuts(self):
@@ -3307,7 +4092,7 @@ class MainWindow(QtWidgets.QWidget):
             on_copy=lambda: QtWidgets.QApplication.clipboard().setImage(
                 bgr_to_qimage(img)),
             on_save=lambda: self._quick_save(img),
-            on_pin=lambda: PinnedImage(bgr_to_qimage(img), on_ocr=self._pin_ocr))
+            on_pin=lambda: self._new_pin(bgr_to_qimage(img)))
         self._thumb.show()
         self._thumb.raise_()
 
@@ -3324,6 +4109,7 @@ class MainWindow(QtWidgets.QWidget):
         self._ocr_serial += 1
         self.image_bgr = img
         self._ocr_image_shown = False
+        self.canvas.clear()
         if show:
             self.showNormal()
             self._show_preview()
@@ -3352,7 +4138,11 @@ class MainWindow(QtWidgets.QWidget):
     def _show_preview(self):
         if self.image_bgr is None:
             return
-        self.canvas.set_image_bgr(self.image_bgr)
+        if self.canvas.base is None or not self._ocr_image_shown:
+            self.canvas.blockSignals(True)
+            self.canvas.set_image_bgr(self.image_bgr)
+            self.canvas.blockSignals(False)
+            self._canvas_base_key = self.canvas.base.cacheKey()
         self.canvas.fit_width(self.scroll.viewport().width())
         self._ocr_image_shown = True
         # Release any automatic OCR result that finished before the image was on screen.
@@ -3437,18 +4227,8 @@ class MainWindow(QtWidgets.QWidget):
             self._place_ocr_btns()
 
     def _do_crop(self, rectf):
-        if self.image_bgr is None:
-            return
-        h, w = self.image_bgr.shape[:2]
-        x0 = max(0, int(rectf.left()));  y0 = max(0, int(rectf.top()))
-        x1 = min(w, int(rectf.right())); y1 = min(h, int(rectf.bottom()))
-        if x1 - x0 < 2 or y1 - y0 < 2:
-            return
-        self.image_bgr = self.image_bgr[y0:y1, x0:x1].copy()
-        self._ocr_serial += 1
-        self._ocr_pending = None                  # stale OCR of the pre-crop image
-        self._show_preview()                        # reset canvas (annotations are cleared)
-        self.status.setText(f"Cropped: {x1 - x0}×{y1 - y0} px (annotations cleared)")
+        self.canvas.crop_image(rectf)
+        self.canvas.fit_width(self.scroll.viewport().width())
 
     def pick_color(self):
         c = QtWidgets.QColorDialog.getColor(self.canvas.color, self, t("dlg_pickcolor"))
@@ -3475,7 +4255,7 @@ class MainWindow(QtWidgets.QWidget):
         self._ocr_workers.append(worker)
         worker.result.connect(
             lambda txt, error: self._on_ocr_result(serial, txt, error, copy_result))
-        worker.wordsReady.connect(self._on_words_ready)
+        worker.wordsReady.connect(lambda words: self._on_words_ready(words) if serial == self._ocr_serial else None)
         worker.finished.connect(lambda: self._release_ocr_worker(worker))
         worker.start()
 
@@ -3547,7 +4327,7 @@ class MainWindow(QtWidgets.QWidget):
         flat = self.canvas.render_flattened()
         if flat is None:
             return
-        PinnedImage(flat, on_ocr=self._pin_ocr)
+        self._new_pin(flat, self.canvas.snapshot_document())
         self.status.setText(t("st_pinned"))
 
     # --- save --- #
@@ -3588,7 +4368,7 @@ class MainWindow(QtWidgets.QWidget):
         menu.addAction(t("cap_record"), self.toggle_record)
         menu.addSeparator()
         menu.addAction(t("tray_show"), lambda: self.handle_command("show"))
-        menu.addAction(t("t_settings"), self.show_settings)
+        menu.addAction(t("t_settings"), lambda: self.handle_command("settings"))
         menu.addAction(t("tray_undo_clickthrough"), self._disable_pin_passthrough)
         menu.addSeparator()
         menu.addAction(t("tray_quit"), self.quit_app)
@@ -3632,11 +4412,13 @@ class MainWindow(QtWidgets.QWidget):
         cb_copy = QtWidgets.QCheckBox(t("set_autocopy")); cb_copy.setChecked(s.value("auto_copy", True, type=bool))
         cb_save = QtWidgets.QCheckBox(t("set_autosave")); cb_save.setChecked(s.value("auto_save", False, type=bool))
         cb_edit = QtWidgets.QCheckBox(t("set_openeditor")); cb_edit.setChecked(s.value("open_editor", False, type=bool))
+        cb_inline = QtWidgets.QCheckBox(t('set_inline'))
+        cb_inline.setChecked(s.value('inline_edit',True,type=bool))
         cb_background = QtWidgets.QCheckBox(t("set_start_hidden"))
         cb_background.setChecked(s.value("start_hidden", False, type=bool))
         cb_snap = QtWidgets.QCheckBox(t("set_snap_windows"))
         cb_snap.setChecked(s.value("snap_windows", True, type=bool))
-        for cb in (cb_copy, cb_save, cb_edit, cb_background, cb_snap):
+        for cb in (cb_copy, cb_save, cb_edit, cb_inline, cb_background, cb_snap):
             gf.addRow(cb)
         tabs.addTab(g, t("tab_general"))
 
@@ -3793,6 +4575,7 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("auto_save", cb_save.isChecked())
         s.setValue("open_editor", cb_edit.isChecked())
         s.setValue("start_hidden", cb_background.isChecked())
+        s.setValue("inline_edit", cb_inline.isChecked())
         s.setValue("snap_windows", cb_snap.isChecked())
         s.setValue("ocr_lang", lang.currentText())
         s.setValue("ocr_psm", psm.currentData())
@@ -3819,14 +4602,50 @@ class MainWindow(QtWidgets.QWidget):
                   "--settings": "t_settings", "--pin1": "cap_pin1",
                   "--pin2": "cap_pin2"}.get(flag, "cap_region"))
 
-    def show_history(self):
-        if not self.history:
-            self.status.setText(t("st_no_history"))
+    def _history_error(self, message):
+        self.status.setText(message)
+        self.tray.showMessage(t('app_name'), message, QtWidgets.QSystemTrayIcon.Warning)
+
+    def _clear_history(self):
+        if self._pending_history:
+            return False
+        self._history_clear_had_error = False
+        self._pending_history = {'screenshots': [], 'clipboard': []}
+        if not self._history_writer.clear():
+            self._pending_history.clear()
+            return False
+        self.status.setText(t('history_clearing'))
+        return True
+
+    def _history_cleared(self, collection):
+        if collection not in self._pending_history:
             return
+        images = self._pending_history.pop(collection)
+        if collection == 'screenshots':
+            self.history = images
+        else:
+            self._clip_images = images
+        if not self._pending_history and not self._history_clear_had_error:
+            self.status.setText(t('history_cleared'))
+
+    def _history_clear_failed(self, collection):
+        self._history_clear_had_error = True
+        new = self._pending_history.pop(collection, [])
+        if collection == 'screenshots':
+            self.history = self._history_store.bounded_entries(collection, new + self.history)
+            self._history_writer.submit_screenshots(self.history)
+        else:
+            self._clip_images = self._history_store.bounded_entries(collection, new + self._clip_images)
+            self._history_writer.submit_clipboard(self._clip_images)
+
+    def show_history(self):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"{t('hist_title')} ({len(self.history)})")
         dlg.resize(560, 480)
         v = QtWidgets.QVBoxLayout(dlg)
+        clear = QtWidgets.QPushButton(t('clear_history'))
+        clear.clicked.connect(lambda: dlg.accept() if self._clear_history() else None)
+        v.addWidget(clear)
         scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
         inner = QtWidgets.QWidget(); grid = QtWidgets.QVBoxLayout(inner)
         for qimg, desc in self.history:
@@ -3844,9 +4663,7 @@ class MainWindow(QtWidgets.QWidget):
         dlg.exec_()
 
     def _load_history(self, qimg):
-        self.image_bgr = qimage_to_bgr(qimg)
-        self._show_preview()
-        self.showNormal(); self.activateWindow(); self.raise_()
+        self._load_into_editor(qimage_to_bgr(qimg))
         self.status.setText("Loaded from history")
 
     # ===================== P5: beautify export ===================== #
@@ -3893,6 +4710,8 @@ class MainWindow(QtWidgets.QWidget):
     def toggle_record(self):
         if self._recorder is not None:
             self._on_record_stop()
+            return
+        if self._unfinished_capture():
             return
         self.showMinimized()
         if getattr(self, "_thumb", None):
