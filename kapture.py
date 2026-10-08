@@ -324,7 +324,15 @@ def line_icon(name, color="#d2d2da", size=22):
     elif name == "line":
         L(6, 18, 18, 6)
     elif name == "pen":
-        L(6, 18, 15, 9); Rr(14, 6, 4, 4, 1); L(6, 18, 7.5, 16.5)
+        # pencil: two parallel strokes as the body, a filled nib, and a short
+        # squiggle under it so it reads as "freehand draw" at small sizes
+        L(8.5, 15, 16.5, 7); L(11, 17.5, 19, 9.5)
+        p.setBrush(QtGui.QColor(color))
+        p.drawPolygon(QtGui.QPolygonF([Pt(8.5, 15), Pt(11, 17.5), Pt(6.5, 19.5)]))
+        p.setBrush(Qt.NoBrush)
+        path = QtGui.QPainterPath(Pt(3, 22))
+        path.cubicTo(Pt(5, 20), Pt(6, 23.5), Pt(8.5, 21.5))
+        p.drawPath(path)
     elif name == "text":
         glyph("T", 0.8)
     elif name == "number":
@@ -351,6 +359,8 @@ def line_icon(name, color="#d2d2da", size=22):
     elif name == "clear":      # trash can
         L(5, 7, 19, 7); Rr(7, 7, 10, 13, 1); L(10, 5, 14, 5)
         L(10, 10, 10, 17); L(14, 10, 14, 17)
+    elif name == "close":      # ✕
+        L(6, 6, 18, 18); L(18, 6, 6, 18)
     else:
         Ell(7, 7, 10, 10)
     p.end()
@@ -1341,7 +1351,7 @@ class FloatingThumbnail(QtWidgets.QWidget):
 
     Callbacks are injected from outside: on_edit / on_copy / on_save / on_pin.
     """
-    THUMB_W = 220
+    THUMB_W = 340
     AUTO_HIDE_MS = 8000
 
     def __init__(self, qimage, on_edit, on_copy, on_save, on_pin):
@@ -1365,24 +1375,27 @@ class FloatingThumbnail(QtWidgets.QWidget):
         pix = QtGui.QPixmap.fromImage(qimage)
         if pix.width() > self.THUMB_W:
             pix = pix.scaledToWidth(self.THUMB_W, Qt.SmoothTransformation)
-        if pix.height() > 260:
-            pix = pix.scaledToHeight(260, Qt.SmoothTransformation)
+        if pix.height() > 400:
+            pix = pix.scaledToHeight(400, Qt.SmoothTransformation)
         self._thumb = QtWidgets.QLabel()
         self._thumb.setPixmap(pix)
         self._thumb.setStyleSheet("border:2px solid #444;border-radius:4px;background:#000;")
         lay.addWidget(self._thumb)
 
-        # Action button row
+        # Action button row — vector line icons shared with the main toolbar
+        # (emoji glyphs render as empty boxes when no emoji font is installed).
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(4)
-        for text, tip, cb in [("✏️", "Edit", self._do_edit),
-                              ("📋", "Copy", self._do_copy),
-                              ("💾", "Save", self._do_save),
-                              ("📌", "Pin to screen", self._do_pin),
-                              ("✕", "Close", self._do_close)]:
-            btn = QtWidgets.QPushButton(text)
+        for icon_name, tip, cb in [("pen", "Edit", self._do_edit),
+                                   ("copy", "Copy", self._do_copy),
+                                   ("save", "Save", self._do_save),
+                                   ("pin", "Pin to screen", self._do_pin),
+                                   ("close", "Close", self._do_close)]:
+            btn = QtWidgets.QToolButton()
+            btn.setIcon(line_icon(icon_name, size=22))
+            btn.setIconSize(QtCore.QSize(22, 22))
             btn.setToolTip(tip)
-            btn.setFixedSize(34, 26)
+            btn.setFixedSize(42, 34)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(cb)
             row.addWidget(btn)
@@ -1390,8 +1403,8 @@ class FloatingThumbnail(QtWidgets.QWidget):
 
         self.setStyleSheet(
             "FloatingThumbnail{background:transparent;}"
-            "QPushButton{background:#2b2b2b;color:#eee;border:none;border-radius:4px;}"
-            "QPushButton:hover{background:#0a84ff;}")
+            "QToolButton{background:#2b2b2b;border:none;border-radius:4px;}"
+            "QToolButton:hover{background:#0a84ff;}")
         self.adjustSize()
         self._place()
 
@@ -1726,6 +1739,8 @@ class MainWindow(QtWidgets.QWidget):
         self._recorder = None        # screen recorder
         self._ocr_workers = []
         self._ocr_serial = 0
+        self._ocr_pending = None        # (serial, text) held until the editor shows the image
+        self._ocr_image_shown = False   # canvas currently paints self.image_bgr
         self._build_ui()
         self._apply_style()
         self._setup_tray()
@@ -2427,6 +2442,7 @@ class MainWindow(QtWidgets.QWidget):
         (auto-OCR works on it) and the window only appears when the user opens it."""
         self._ocr_serial += 1
         self.image_bgr = img
+        self._ocr_image_shown = False
         if show:
             self.showNormal()
             self._show_preview()
@@ -2439,6 +2455,8 @@ class MainWindow(QtWidgets.QWidget):
         self.image_bgr = None
         self.canvas.clear()
         self.text.clear()
+        self._ocr_pending = None
+        self._ocr_image_shown = False
         self.status.setText(t("st_ready"))
 
     def _open_editor(self):
@@ -2455,6 +2473,12 @@ class MainWindow(QtWidgets.QWidget):
             return
         self.canvas.set_image_bgr(self.image_bgr)
         self.canvas.fit_width(self.scroll.viewport().width())
+        self._ocr_image_shown = True
+        # Release any automatic OCR result that finished before the image was on screen.
+        if self._ocr_pending and self._ocr_pending[0] == self._ocr_serial:
+            _serial, txt = self._ocr_pending
+            self._ocr_pending = None
+            self.text.setPlainText(txt)
 
     def _do_crop(self, rectf):
         if self.image_bgr is None:
@@ -2466,6 +2490,7 @@ class MainWindow(QtWidgets.QWidget):
             return
         self.image_bgr = self.image_bgr[y0:y1, x0:x1].copy()
         self._ocr_serial += 1
+        self._ocr_pending = None                  # stale OCR of the pre-crop image
         self._show_preview()                        # reset canvas (annotations are cleared)
         self.status.setText(f"Cropped: {x1 - x0}×{y1 - y0} px (annotations cleared)")
 
@@ -2506,7 +2531,6 @@ class MainWindow(QtWidgets.QWidget):
         if error:
             self.status.setText(error)
             return
-        self.text.setPlainText(txt)
         if copy_result:
             QtWidgets.QApplication.clipboard().setText(txt)
         if _LANG == "en":
@@ -2515,6 +2539,12 @@ class MainWindow(QtWidgets.QWidget):
         else:
             self.status.setText(
                 f"OCR 完成{'，已复制文字' if copy_result else ''}（{len(txt)} 字符）")
+        if not copy_result and not self._ocr_image_shown:
+            # Automatic OCR of a background capture finished before the image is
+            # in the editor: hold the text until the user actually opens it.
+            self._ocr_pending = (serial, txt)
+            return
+        self.text.setPlainText(txt)
 
     # --- copy image to clipboard --- #
     def copy_image(self):

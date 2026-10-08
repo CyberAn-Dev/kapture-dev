@@ -50,6 +50,8 @@ class AutoOcrTest(unittest.TestCase):
         image = np.full((40, 120, 3), 255, dtype=np.uint8)
         with mock.patch("pytesseract.image_to_string", return_value="hello") as engine:
             self.window._present_capture(image, "Captured")
+            # The result waits until the image is actually in the editor UI.
+            self.window._open_editor()
             for _ in range(200):
                 QtTest.QTest.qWait(10)
                 if self.window.text.toPlainText() == "hello":
@@ -58,6 +60,22 @@ class AutoOcrTest(unittest.TestCase):
         self.assertEqual(self.window.text.toPlainText(), "hello")
         self.assertIs(self.window.image_bgr, image)
         self.assertTrue(self.app.clipboard().mimeData().hasImage())
+
+    def test_automatic_ocr_result_waits_for_the_editor(self):
+        # Background capture: OCR may finish before the image is on screen; the
+        # text must not appear in a hidden/stale editor, only when it opens.
+        image = np.full((40, 120, 3), 255, dtype=np.uint8)
+        with mock.patch("pytesseract.image_to_string", return_value="held"):
+            self.window._present_capture(image, "Captured")
+            for _ in range(200):
+                QtTest.QTest.qWait(10)
+                if self.window._ocr_pending:
+                    break
+            self.assertEqual(self.window._ocr_pending[1:], ("held",))
+            self.assertEqual(self.window.text.toPlainText(), "")
+            self.window._open_editor()
+        self.assertEqual(self.window.text.toPlainText(), "held")
+        self.assertIsNone(self.window._ocr_pending)
 
     def test_auto_ocr_can_be_disabled_without_opening_editor(self):
         def disable_auto_ocr(dialog):
@@ -101,6 +119,7 @@ class AutoOcrTest(unittest.TestCase):
                     break
             self.assertTrue(started.is_set())
             self.window._present_capture(image.copy(), "Second")
+            self.window._open_editor()      # results display once the image is on screen
             for _ in range(200):
                 QtTest.QTest.qWait(10)
                 if self.window.text.toPlainText() == "new":
