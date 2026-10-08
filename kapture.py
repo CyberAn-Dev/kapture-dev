@@ -815,6 +815,55 @@ def find_new_content(prev_bgr, cur_bgr, min_confidence=0.5):
     return new_start, max_val
 
 
+def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.5):
+    """Where does this viewport frame belong on the global canvas?
+
+    PixPin-style canvas stitching: match the frame's top and bottom strips
+    against the canvas (around y_hint ± band for speed) and return the offset
+    y of the frame's top row on the canvas. y may be negative (frame pokes
+    above the canvas top after scrolling up) or place the frame bottom past
+    the canvas bottom (new content below). Returns (None, conf) when nothing
+    trustworthy matched — the caller then simply ignores the frame, which
+    loses at worst a stretch of fast scroll but never duplicates content.
+    """
+    ch, h = canvas_bgr.shape[0], frame_bgr.shape[0]
+    if h > ch:
+        return None, 0.0
+    cg = cv2.cvtColor(canvas_bgr, cv2.COLOR_BGR2GRAY)
+    fg = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    s = max(24, h // 4)
+    y0 = max(0, int(y_hint) - band)
+    y1 = min(ch, int(y_hint) + band + h)          # cap the search band; a scroll
+    if y1 - y0 < s:                                # step between ticks stays small
+        y0 = max(0, min(y0, ch - s))
+        y1 = ch
+    best_y, best_conf = None, 0.0
+    for strip, base in ((fg[:s, :], 0), (fg[h - s:h, :], h - s)):
+        if y0 + s > y1:
+            break
+        res = cv2.matchTemplate(cg[y0:y1, :], strip, cv2.TM_CCOEFF_NORMED)
+        _, mx, _, loc = cv2.minMaxLoc(res)
+        y = y0 + loc[1] - base
+        if mx > best_conf:
+            best_y, best_conf = y, mx
+    if best_y is not None and best_conf >= conf_min:
+        return best_y, best_conf
+    return None, best_conf
+
+
+def stitch_frame(canvas_bgr, frame_bgr, y):
+    """Merge a located frame into the canvas: prepend rows above / append rows
+    below that fall outside it, drop everything that overlaps (the dedup that
+    makes repeated up/down scrolling safe). Returns (canvas, y_of_frame_top)."""
+    ch, h = canvas_bgr.shape[0], frame_bgr.shape[0]
+    if y < 0:
+        canvas_bgr = np.vstack([frame_bgr[:-y, :], canvas_bgr])
+        y = 0
+    if y + h > ch:
+        canvas_bgr = np.vstack([canvas_bgr, frame_bgr[ch - y:, :]])
+    return canvas_bgr, y
+
+
 def refine_new_start(prev_bgr, cur_bgr, new_start, win=16, strip=10):
     """Snap the guessed seam to the row where the current frame actually aligns with
     the bottom of the previous frame.
@@ -2667,12 +2716,12 @@ class MainWindow(QtWidgets.QWidget):
         else:
             self._present_capture(img, f"Long capture done: {img.shape[1]}×{img.shape[0]} px")
 
-    # --- manual scrolling capture --- #
+    # --- manual scrolling capture (PixPin-style global canvas) --- #
     def _manual_start(self, phys, gr):
         try:
             self._m_phys = phys
             self._m_acc = grab_region(*phys)
-            self._m_prev = self._m_acc.copy()
+            self._m_y = 0                          # last located frame top on canvas
             self._scroll_overlay = ScrollRegionOverlay(gr)
             self._scroll_hud = ScrollHud(gr, self._manual_stop, mode="manual")
             self._scroll_hud.show_on_top()
@@ -2689,12 +2738,19 @@ class MainWindow(QtWidgets.QWidget):
     MANUAL_MAX_H = 40000        # max manual long-image height, to avoid runaway memory growth
 
     def _manual_tick(self):
+        """Locate every frame on the global canvas instead of blindly appending.
+
+        The old prev-frame comparison assumed content only ever appears below,
+        so scrolling up and back down stitched the same area in twice. A frame
+        whose position is already on the canvas contributes nothing; only rows
+        outside the canvas (below, or above when scrolled back past the start)
+        extend it — which also means frames are idempotent, and fast scrolls
+        that fail to locate are skipped rather than duplicated.
+        """
         cur = grab_region(*self._m_phys)
-        new_start, conf = find_new_content(self._m_prev, cur)
-        if conf >= 0.45 and new_start < cur.shape[0] - 2:
-            new_start = refine_new_start(self._m_prev, cur, new_start)
-            self._m_acc = np.vstack([self._m_acc, cur[new_start:, :]])
-        self._m_prev = cur
+        y, conf = locate_frame(self._m_acc, cur, y_hint=self._m_y)
+        if y is not None:
+            self._m_acc, self._m_y = stitch_frame(self._m_acc, cur, y)
         if self._scroll_hud is not None:
             if self._m_acc.shape[0] > 1200:         # keep the letterbox resize cheap
                 s = 1200.0 / self._m_acc.shape[0]

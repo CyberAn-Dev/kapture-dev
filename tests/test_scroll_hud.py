@@ -144,6 +144,51 @@ class SeamRefineTest(unittest.TestCase):
         self.assertEqual(kapture.refine_new_start(prev, cur, 395), 395)  # near bottom
 
 
+class CanvasStitchTest(unittest.TestCase):
+    """Global-canvas stitching: repeatedly scrolling up and down must NOT
+    duplicate content — frames already covered contribute nothing."""
+
+    def _page(self, h=1600, w=300, seed=3):
+        rng = np.random.RandomState(seed)
+        return rng.randint(0, 256, (h, w, 3), dtype=np.uint8)
+
+    def test_down_up_down_is_idempotent(self):
+        page = self._page()
+        vh = 400
+        canvas, y = page[0:vh].copy(), 0             # stitch the first frame at the top
+        seq = [0, 150, 300, 450, 300, 150, 0, 150, 300, 450, 600, 450, 600]
+        for top in seq:
+            frame = page[top:top + vh]
+            y_est, conf = kapture.locate_frame(canvas, frame, y_hint=y)
+            self.assertIsNotNone(y_est, f"frame at {top} failed to locate")
+            self.assertGreaterEqual(conf, 0.9)
+            self.assertEqual(y_est, top)               # exact global position
+            canvas, y = kapture.stitch_frame(canvas, frame, y_est)
+        # canvas grew exactly to cover [0, max(top)+vh) — never more
+        self.assertEqual(canvas.shape[0], max(seq) + vh)
+        self.assertTrue(np.array_equal(canvas, page[:max(seq) + vh]))
+
+    def test_scroll_up_extends_canvas_above(self):
+        page = self._page()
+        vh = 400
+        canvas = page[200:200 + vh].copy()             # started mid-page
+        frame = page[0:vh]                             # user scrolled back to top
+        y_est, conf = kapture.locate_frame(canvas, frame, y_hint=0)
+        self.assertEqual(y_est, -200)                  # frame top pokes above canvas
+        canvas2, y2 = kapture.stitch_frame(canvas, frame, y_est)
+        self.assertEqual(canvas2.shape[0], vh + 200)
+        self.assertTrue(np.array_equal(canvas2, page[:vh + 200]))
+
+    def test_unlocatable_frame_is_skipped_not_appended(self):
+        page = self._page()
+        vh = 400
+        canvas = page[0:vh].copy()
+        other = np.random.RandomState(99).randint(0, 256, (vh, 300, 3), dtype=np.uint8)
+        y_est, conf = kapture.locate_frame(canvas, other, y_hint=0)
+        self.assertIsNone(y_est)                       # garbage in -> frame ignored
+        self.assertLess(conf, 0.5)
+
+
 class ScrollModeWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
