@@ -14,6 +14,8 @@
 
 ## Completed
 
+- Screenshot history now retains the latest 10 images, including pruning older oversized on-disk collections on load. The history dialog uses a balanced two-column thumbnail grid, concise localized titles and image dimensions; clicking a card resumes editing.
+
 - 2026-10-09: blue selection borders have four corner and four edge grips; hovering/dragging an edge displays the reused pixel loupe. Resizing crops the original frozen desktop, preserves annotation positions and reframes undo history. Plain region/window/repeat captures retain that frozen desktop; long-image results retain the scrollable preview.
 - Capture tools use 40px targets and 26px icons rendered at the screen device-pixel ratio; a consistent rounded monoline icon set, restrained charcoal/blue styling, a group divider and a highlighted Copy action improve readability. OCR/text/number icons no longer depend on font glyphs. Undo is directly available on the bar. Tools are grouped into one row: selection, shapes, pen/highlighter, arrow/line, text/number, magnifier, pixel/Gaussian mosaic, and settings. Settings retains color, width, undo/redo, crop and full-editor access. The final action row is long capture, record, OCR, pin, save, cancel, copy. Status hints float outside the bar. Long capture starts manual scrolling in the existing red frame; record reuses the adjusted region.
 - Pins now share the compact grouped editing toolbar and refined monoline icons, with direct Undo/OCR/save/finish/copy and full-editor access in settings. Small pins reposition when the wider toolbar opens near a screen edge; leaving/re-entering editing preserves document history and hides stale status hints.

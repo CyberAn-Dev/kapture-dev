@@ -4333,7 +4333,9 @@ class MainWindow(QtWidgets.QWidget):
         self.canvas.empty_text = dim
         self.canvas.update()
         self.setStyleSheet(f"""
-        QWidget#root, QDialog {{ background:{window}; }}
+        QWidget#root, QDialog, QWidget#historyGrid {{ background:{window}; }}
+        QToolButton#historyCard {{ background:{panel}; border:1px solid {edge}; }}
+        QToolButton#historyCard:hover {{ background:{hover}; border-color:{a}; }}
         QWidget {{ color:{fg}; font-size:13px; }}
         QLabel {{ color:{muted}; }}
         QLabel#dim {{ color:{dim}; font-size:12px; }}
@@ -5531,30 +5533,56 @@ class MainWindow(QtWidgets.QWidget):
     def show_history(self):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"{t('hist_title')} ({len(self.history)})")
-        dlg.resize(560, 480)
+        dlg.resize(600, 560)
         v = QtWidgets.QVBoxLayout(dlg)
+        v.setContentsMargins(20, 16, 20, 16)
+        v.setSpacing(16)
+        header = QtWidgets.QHBoxLayout()
+        label = QtWidgets.QLabel(
+            f"最近 {len(self.history)} 张 · 最多保留 10 张" if _LANG == "zh"
+            else f"{len(self.history)} recent · Up to 10 screenshots")
+        header.addWidget(label)
+        header.addStretch()
         clear = QtWidgets.QPushButton(t('clear_history'))
         clear.clicked.connect(lambda: dlg.accept() if self._clear_history() else None)
-        v.addWidget(clear)
-        scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
-        inner = QtWidgets.QWidget(); grid = QtWidgets.QVBoxLayout(inner)
-        for qimg, desc in self.history:
-            row = QtWidgets.QPushButton()
-            row.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(
-                qimg.scaledToWidth(160, Qt.SmoothTransformation))))
-            row.setIconSize(QtCore.QSize(160, 100))
-            row.setText("  " + desc)
-            row.setStyleSheet("text-align:left;")
-            row.clicked.connect(
-                lambda _, q=qimg: (self._load_history(q), dlg.accept()))
-            grid.addWidget(row)
-        grid.addStretch(1)
-        scroll.setWidget(inner); v.addWidget(scroll)
+        header.addWidget(clear)
+        v.addLayout(header)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        inner = QtWidgets.QWidget()
+        inner.setObjectName("historyGrid")
+        grid = QtWidgets.QGridLayout(inner)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(12)
+        for index, (qimg, _desc) in enumerate(self.history):
+            card = QtWidgets.QToolButton()
+            card.setObjectName("historyCard")
+            card.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            card.setIcon(QtGui.QIcon(QtGui.QPixmap.fromImage(qimg.scaled(
+                230, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))))
+            card.setIconSize(QtCore.QSize(230, 140))
+            title = f"截图 {index + 1}" if _LANG == "zh" else f"Screenshot {index + 1}"
+            card.setText(f"{title}\n{qimg.width()} × {qimg.height()}")
+            card.setToolTip("点击继续编辑" if _LANG == "zh" else "Click to edit")
+            card.setMinimumSize(250, 196)
+            card.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            card.clicked.connect(lambda _, q=qimg: (self._load_history(q), dlg.accept()))
+            grid.addWidget(card, index // 2, index % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch((len(self.history) + 1) // 2, 1)
+        if not self.history:
+            empty = QtWidgets.QLabel("暂无截图" if _LANG == "zh" else "No screenshots yet")
+            empty.setAlignment(Qt.AlignCenter)
+            grid.addWidget(empty, 0, 0, 1, 2)
+        scroll.setWidget(inner)
+        v.addWidget(scroll)
         dlg.exec_()
 
     def _load_history(self, qimg):
         self._load_into_editor(qimage_to_bgr(qimg))
-        self.status.setText("Loaded from history")
+        self.status.setText("已打开历史截图" if _LANG == "zh" else "Loaded from history")
 
     # ===================== P5: beautify export ===================== #
     def _beautify_image(self):

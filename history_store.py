@@ -20,7 +20,7 @@ class ImageHistoryStore:
     ``errors`` so the caller can report them without losing the in-memory list.
     """
 
-    LIMITS = {"screenshots": 30, "clipboard": 10}
+    LIMITS = {"screenshots": 10, "clipboard": 10}
     MAX_TOTAL_PIXELS = 40_000_000
 
     def __init__(self, root):
@@ -122,7 +122,10 @@ class ImageHistoryStore:
             })
             total_pixels += pixels
         self._cache[collection] = loaded
-        return self._cached_values(collection)
+        values = self._cached_values(collection)
+        if len(records) > self.LIMITS[collection]:
+            self._save_collection(collection, values)
+        return values
 
     def _save_collection(self, collection, entries):
         folder = self._folder(collection)

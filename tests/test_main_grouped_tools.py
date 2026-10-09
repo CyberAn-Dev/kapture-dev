@@ -7,7 +7,7 @@ from unittest import mock
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 import kapture
 
@@ -38,6 +38,36 @@ class MainGroupedToolsTest(unittest.TestCase):
         self.window.close()
         self.desktop_patch.stop()
         kapture.set_lang("zh")
+
+    def test_history_grid_has_centered_thumbnails_and_opens_selected_image(self):
+        kapture.set_lang("zh")
+        self.window._apply_style("vitesse_dark")
+        images = []
+        for color, width, height in (("#4d9375", 800, 450), ("#bd976a", 300, 700),
+                                     ("#6394bf", 900, 300)):
+            image = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
+            image.fill(QtGui.QColor(color))
+            images.append(image)
+        self.window.history = [(image, "Region captured: internal detail") for image in images]
+
+        def inspect(dialog):
+            dialog.show()
+            self.app.processEvents()
+            cards = dialog.findChildren(QtWidgets.QToolButton, "historyCard")
+            self.assertEqual(len(cards), 3)
+            self.assertEqual(cards[0].text(), "截图 1\n800 × 450")
+            self.assertEqual(cards[0].y(), cards[1].y())
+            self.assertGreater(cards[1].x(), cards[0].x())
+            self.assertGreater(cards[2].y(), cards[0].y())
+            self.assertEqual(cards[0].toolButtonStyle(), QtCore.Qt.ToolButtonTextUnderIcon)
+            dialog.grab().save("/tmp/kapture-history-grid.png")
+            cards[1].click()
+            return 0
+
+        with mock.patch.object(QtWidgets.QDialog, "exec_", new=inspect), \
+                mock.patch.object(self.window, "_load_history") as load:
+            self.window.show_history()
+            load.assert_called_once_with(images[1])
 
     def test_tool_menus_choose_one_canvas_tool_and_keep_group_highlights_exclusive(self):
         groups = getattr(self.window, "_main_tool_groups", {})

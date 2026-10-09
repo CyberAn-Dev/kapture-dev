@@ -68,12 +68,22 @@ class ImageHistoryStoreTest(unittest.TestCase):
         self.assertTrue(store.save_clipboard(clipboard))
         restored_screenshots, restored_clipboard = ImageHistoryStore(self.root).load()
 
-        self.assertEqual(len(restored_screenshots), 30)
+        self.assertEqual(len(restored_screenshots), 10)
         self.assertEqual([desc for _, desc in restored_screenshots],
-                         [str(index) for index in range(30)])
+                         [str(index) for index in range(10)])
         self.assertEqual(len(restored_clipboard), 10)
         self.assertEqual(restored_clipboard[0].pixelColor(0, 0),
                          QtGui.QColor(0, 1, 0))
+
+    def test_load_prunes_legacy_history_to_ten_files(self):
+        entries = [(_solid_image(QtGui.QColor(i, 0, 0)), str(i)) for i in range(30)]
+        with mock.patch.dict(ImageHistoryStore.LIMITS, {"screenshots": 30}):
+            self.assertTrue(ImageHistoryStore(self.root).save_screenshots(entries))
+        loaded = ImageHistoryStore(self.root).load_screenshots()
+        self.assertEqual([desc for _, desc in loaded], [str(i) for i in range(10)])
+        folder = self.root / "screenshots"
+        self.assertEqual(len(list(folder.glob("*.png"))), 10)
+        self.assertEqual(len(json.loads((folder / "manifest.json").read_text())), 10)
 
     def test_save_reuses_existing_pngs_and_writes_only_new_image(self):
         initial_store = ImageHistoryStore(self.root)
@@ -332,7 +342,7 @@ class ImageHistoryStoreTest(unittest.TestCase):
                 for index in range(35)]
         bounded_count = ImageHistoryStore.bounded_entries("screenshots", many)
         self.assertEqual([description for _, description in bounded_count],
-                         [str(index) for index in range(30)])
+                         [str(index) for index in range(10)])
 
     def test_load_checks_pixel_budget_before_decoding_each_image(self):
         old_budget = ImageHistoryStore.MAX_TOTAL_PIXELS
