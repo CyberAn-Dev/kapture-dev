@@ -3581,24 +3581,132 @@ class RecordingOptions(QtWidgets.QWidget):
             settings.setValue('record_' + key, value)
 
 
-class RecordSetupDialog(QtWidgets.QDialog):
-    def __init__(self, settings, size, parent=None):
-        super().__init__(parent)
-        if parent is not None:
-            self.setStyleSheet(parent.styleSheet())
-        self.setWindowTitle('录屏设置' if _LANG == 'zh' else 'Recording setup')
-        self.setMinimumWidth(360)
-        layout = QtWidgets.QVBoxLayout(self)
+class RecordSetupBar(QtWidgets.QDialog):
+    """Region-adjacent recording controls; reuse RecordingOptions for values/defaults."""
+    _place = ScrollHud._place
+    paintEvent = ScrollHud.paintEvent
+
+    def __init__(self, settings, size, region=None, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
+                         Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setObjectName('recordSetupBar')
+        self.setWindowTitle('录屏' if _LANG == 'zh' else 'Recording')
+        self._region = QRect(region) if region is not None else QRect()
+        theme = settings.value('ui_theme', 'dark')
+        if theme == 'system': theme = 'dark' if system_prefers_dark() else 'light'
+        colors = THEMES.get(theme, THEMES['dark'])
+        inherited = parent.styleSheet() if parent is not None else ''
+        self.setStyleSheet(inherited + f'''
+            QDialog#recordSetupBar {{ background:{colors['panel']}; border:1px solid {colors['edge']}; border-radius:9px; }}
+            QToolButton#recordOption {{ padding:0px 18px 0px 8px; min-height:36px; }}
+            QToolButton#recordOption::menu-indicator {{ subcontrol-origin:padding;
+                subcontrol-position:center right; right:6px; width:6px; height:6px; }}
+            QToolButton#recordStart {{ background:{colors['accent']}; color:{colors['on_accent']};
+                padding:0px 12px; min-height:36px; }}
+        ''')
         self.options = RecordingOptions(settings, size, self)
-        layout.addWidget(self.options)
-        note = QtWidgets.QLabel('结束后选择 MP4、GIF 或 MKV 格式' if _LANG == 'zh'
-                                else 'Choose MP4, GIF or MKV after recording')
-        layout.addWidget(note)
-        buttons = QtWidgets.QDialogButtonBox()
-        buttons.addButton('开始录制' if _LANG == 'zh' else 'Start recording', QtWidgets.QDialogButtonBox.AcceptRole)
-        buttons.addButton('取消' if _LANG == 'zh' else 'Cancel', QtWidgets.QDialogButtonBox.RejectRole)
-        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.options.hide()
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(8, 6, 8, 6); row.setSpacing(4)
+        self.fps_button = self._number_menu(row, self.options.fps, (10, 15, 24, 30, 60),
+                                            '帧率' if _LANG == 'zh' else 'Frame rate',
+                                            lambda value: f'{value} fps')
+        self.resolution_button = self._menu_button(row, '分辨率' if _LANG == 'zh' else 'Resolution')
+        resolution_menu = self.resolution_button.menu()
+        self._resolution_actions = []
+        for index in range(self.options.resolution.count() - 1):
+            action = resolution_menu.addAction(self.options.resolution.itemText(index))
+            action.setCheckable(True)
+            action.triggered.connect(lambda _, i=index: self.options.resolution.setCurrentIndex(i))
+            self._resolution_actions.append(action)
+        resolution_menu.addSeparator()
+        custom = QtWidgets.QWidget(); form = QtWidgets.QHBoxLayout(custom)
+        form.addWidget(QtWidgets.QLabel('自定义宽度' if _LANG == 'zh' else 'Custom width'))
+        self.custom_width = QtWidgets.QSpinBox(); self.custom_width.setRange(2, 7680)
+        self.custom_width.setSingleStep(2); self.custom_width.setSuffix(' px')
+        self.custom_width.setValue(self.options.width.value()); form.addWidget(self.custom_width)
+        custom_action = QtWidgets.QWidgetAction(resolution_menu); custom_action.setDefaultWidget(custom)
+        resolution_menu.addAction(custom_action)
+        self.custom_width.valueChanged.connect(self._custom_resolution)
+        # Enter also selects an unchanged custom value.
+        self.custom_width.lineEdit().returnPressed.connect(lambda: self._custom_resolution(self.custom_width.value()))
+        self.custom_width.lineEdit().returnPressed.connect(resolution_menu.close)
+        self.options.resolution.currentIndexChanged.connect(self._update_resolution)
+        self.options.width.valueChanged.connect(self._update_resolution)
+        self._update_resolution()
+        self.countdown_button = self._number_menu(row, self.options.countdown, (0, 3, 5, 10),
+            '开始倒计时' if _LANG == 'zh' else 'Countdown',
+            lambda value: (f'{value} 秒后开始' if value else '无倒计时') if _LANG == 'zh'
+                          else (f'Start in {value}s' if value else 'No countdown'))
+        self.duration_button = self._number_menu(row, self.options.duration, (0, 5, 10, 15, 30, 60),
+            '录制时长' if _LANG == 'zh' else 'Duration',
+            lambda value: (f'录制 {value} 秒' if value else '手动停止') if _LANG == 'zh'
+                          else (f'Record {value}s' if value else 'Manual stop'))
+        separator = QtWidgets.QFrame(); separator.setFrameShape(QtWidgets.QFrame.VLine)
+        separator.setFixedHeight(24); row.addWidget(separator)
+        self.start_button = QtWidgets.QToolButton(); self.start_button.setObjectName('recordStart')
+        self.start_button.setText('开始录制' if _LANG == 'zh' else 'Start')
+        self.start_button.setCursor(Qt.PointingHandCursor)
+        self.start_button.clicked.connect(self.accept); row.addWidget(self.start_button)
+        self.cancel_button = QtWidgets.QToolButton()
+        self.cancel_button.setIcon(line_icon('close', size=22, color=colors['icon']))
+        self.cancel_button.setIconSize(QtCore.QSize(22, 22)); self.cancel_button.setFixedSize(36, 36)
+        self.cancel_button.setToolTip('取消录屏 · Esc' if _LANG == 'zh' else 'Cancel recording · Esc')
+        self.cancel_button.clicked.connect(self.reject); row.addWidget(self.cancel_button)
+        self._reposition()
+
+    def _reposition(self):
+        self.adjustSize()
+        self._place()
+        if not self._can_show:
+            # Full-screen capture has no outside space; setup disappears before capture starts.
+            screen = QtWidgets.QApplication.screenAt(self._region.center()) or QtWidgets.QApplication.primaryScreen()
+            bounds = screen.availableGeometry()
+            self.move(bounds.center().x() - self.width() // 2, bounds.bottom() - self.height() - 12)
+
+    def _menu_button(self, row, tooltip):
+        button = QtWidgets.QToolButton(); button.setObjectName('recordOption')
+        button.setToolTip(tooltip); button.setCursor(Qt.PointingHandCursor)
+        button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        button.setMenu(QtWidgets.QMenu(button)); row.addWidget(button)
+        button.menu().aboutToHide.connect(self._reposition)
+        return button
+
+    def _number_menu(self, row, control, presets, tooltip, label):
+        button = self._menu_button(row, tooltip)
+        menu = button.menu(); actions = []
+        for value in presets:
+            action = menu.addAction(label(value)); action.setCheckable(True)
+            action.triggered.connect(lambda _, n=value: control.setValue(n))
+            actions.append((value, action))
+        menu.addSeparator()
+        custom = QtWidgets.QWidget(); form = QtWidgets.QHBoxLayout(custom)
+        form.addWidget(QtWidgets.QLabel('自定义' if _LANG == 'zh' else 'Custom'))
+        spin = QtWidgets.QSpinBox(); spin.setRange(control.minimum(), control.maximum())
+        spin.setValue(control.value()); spin.setSuffix(control.suffix())
+        if control.specialValueText(): spin.setSpecialValueText(control.specialValueText())
+        form.addWidget(spin)
+        action = QtWidgets.QWidgetAction(menu); action.setDefaultWidget(custom); menu.addAction(action)
+        spin.valueChanged.connect(control.setValue)
+        spin.lineEdit().returnPressed.connect(menu.close)
+        def update(value):
+            button.setText(label(value))
+            spin.setValue(value)
+            for number, candidate in actions: candidate.setChecked(number == value)
+        control.valueChanged.connect(update); update(control.value())
+        button.custom_input = spin
+        return button
+
+    def _custom_resolution(self, width):
+        self.options.width.setValue(width)
+        self.options.resolution.setCurrentIndex(self.options.resolution.findData('custom'))
+
+    def _update_resolution(self):
+        size = self.options.output_size()
+        self.resolution_button.setText(f'{size[0]} × {size[1]}')
+        for index, action in enumerate(self._resolution_actions):
+            action.setChecked(index == self.options.resolution.currentIndex())
 
 
 class RecordingExporter(QtCore.QObject):
@@ -4048,14 +4156,17 @@ class MainWindow(QtWidgets.QWidget):
         if self._history_store.errors:
             self.status.setText(self._history_store.errors[-1])
 
-    def _tbtn(self, icon, tip, checkable=False):
+    def _tbtn(self, icon, tip, checkable=False, editor_dropdown=False):
         b = QtWidgets.QToolButton(self)
         b.setIcon(line_icon(icon,size=24))
         b.setIconSize(QtCore.QSize(24, 24))
         b.setFixedSize(36, 36)
         b.setToolTip(tip)
         b.setCheckable(checkable)
-        b.setStyleSheet("QToolButton{padding:3px;}")
+        if editor_dropdown:
+            b.setProperty("editorDropdown", True)
+        else:
+            b.setStyleSheet("QToolButton{padding:3px;}")
         b.setAutoRaise(True)
         b.setCursor(Qt.PointingHandCursor)
         return b
@@ -4107,23 +4218,21 @@ class MainWindow(QtWidgets.QWidget):
 
         # ---------- Capture, capture options, and window actions ---------- #
         top = QtWidgets.QHBoxLayout(); top.setSpacing(8)
-        self.btn_single = self._tbtn("region", "")
+        self.btn_single = self._tbtn("region", "", editor_dropdown=True)
         self.btn_single.setObjectName("primaryCapture")
-        self.btn_single.setProperty("editorDropdown", True)
         self.btn_single.setFixedWidth(40)
         self._capture_menu = QtWidgets.QMenu(self.btn_single)
         self.btn_single.setMenu(self._capture_menu)
         self.btn_single.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         self.btn_textgrab = self._tbtn("textgrab", "")
         self.btn_window = self._tbtn("window", "")
-        self.btn_scroll = self._tbtn("scroll", "")
+        self.btn_scroll = self._tbtn("scroll", "", editor_dropdown=True)
         self._scroll_direction = 1
         self._scroll_menu = QtWidgets.QMenu(self.btn_scroll)
         self._scroll_down_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(1))
         self._scroll_up_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(-1))
         self.btn_scroll.setMenu(self._scroll_menu)
         self.btn_scroll.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
-        self.btn_scroll.setProperty("editorDropdown", True)
         self.btn_scroll.setFixedWidth(40)
         self.btn_manual = self._tbtn("manual", "")
         self.btn_record = self._tbtn("record", "")
@@ -4623,8 +4732,12 @@ class MainWindow(QtWidgets.QWidget):
             border-bottom-right-radius:9px; }}
 
 
-        QToolButton[editorDropdown="true"] {{ padding:0px; }}
+        QToolButton[editorDropdown="true"] {{ padding:0px 8px 0px 0px; }}
         QToolButton[editorDropdown="true"]::menu-button {{ width:10px; }}
+        QToolButton[editorDropdown="true"]::menu-arrow {{
+            subcontrol-origin:padding; subcontrol-position:center right;
+            right:1px; width:8px; height:8px;
+        }}
 
         QToolButton#outputMenuButton {{ padding:0px 14px 0px 6px; }}
         QToolButton#outputMenuButton::menu-indicator {{
@@ -5948,11 +6061,13 @@ class MainWindow(QtWidgets.QWidget):
         if min(phys[2:]) < 2:
             self._restore(); return
         gr = QRect(round(phys[0]/dpr), round(phys[1]/dpr), round(phys[2]/dpr), round(phys[3]/dpr))
-        dialog = RecordSetupDialog(self.settings, phys[2:], self)
+        self._record_border = ScrollRegionOverlay(gr)
+        dialog = RecordSetupBar(self.settings, phys[2:], gr, self)
         self._record_setup = dialog
         accepted = dialog.exec_() == QtWidgets.QDialog.Accepted
         self._record_setup = None
         if not accepted:
+            self._close_record_controls()
             dialog.deleteLater()
             if self._inline_editor is None:
                 self._restore()
@@ -5962,7 +6077,6 @@ class MainWindow(QtWidgets.QWidget):
         dialog.deleteLater()
         self.hide()
         self._record_pending = (phys, gr, options)
-        self._record_border = ScrollRegionOverlay(gr)
         self._recbar = RecordBar(self._on_record_stop, gr, fps=options['fps'],
                                  output_size=options['output_size'], duration=options['duration'])
         self._recbar._t.stop()
@@ -5975,7 +6089,7 @@ class MainWindow(QtWidgets.QWidget):
             self._recbar.set_countdown(self._record_countdown_left)
             self._record_countdown.start()
         else:
-            # Give the settings dialog a chance to leave the Xorg framebuffer.
+            # Give the setup toolbar a chance to leave the Xorg framebuffer.
             self._record_countdown.setInterval(180)
             self._record_countdown.start()
         return True

@@ -28,17 +28,44 @@ class RecordingWorkflowTest(unittest.TestCase):
         self.app.processEvents(); self.listener.stop(); self.directory.cleanup()
 
     def test_recording_dialogs_follow_current_editor_theme(self):
+        self.settings.setValue('ui_theme', 'vitesse_dark')
         self.window._apply_style('vitesse_dark', 'theme')
-        dialogs = [kapture.RecordSetupDialog(self.settings, (400, 240), self.window),
+        dialogs = [kapture.RecordSetupBar(self.settings, (400, 240), QtCore.QRect(10, 20, 400, 240), self.window),
                    kapture.RecordExportDialog('/tmp/source.mp4', 15, 2, self.directory.name,
                                               'clip.mp4', self.window)]
         for dialog in dialogs:
             dialog.show(); self.app.processEvents()
-            self.assertEqual(dialog.grab().toImage().pixelColor(2, 2).name(), '#121212')
+            self.assertEqual(dialog.grab().toImage().pixelColor(10, 10).name(),
+                             '#181818' if isinstance(dialog, kapture.RecordSetupBar) else '#121212')
             dialog.hide(); dialog.deleteLater()
 
+    def test_recording_bar_menus_share_options_and_custom_inputs(self):
+        bar = kapture.RecordSetupBar(self.settings, (400, 240), QtCore.QRect(10, 20, 400, 240), self.window)
+        bar.show(); self.app.processEvents()
+        self.assertLess(bar.height(), 70)
+        self.assertFalse(bar.options.isVisible())
+        self.assertFalse(bar.geometry().intersects(bar._region))
+        bar.fps_button.menu().actions()[3].trigger()
+        self.assertEqual(bar.options.fps.value(), 30)
+        bar.fps_button.custom_input.setValue(27)
+        self.assertEqual(bar.options.values()['fps'], 27)
+        self.assertEqual(bar.fps_button.text(), '27 fps')
+        bar.resolution_button.menu().actions()[3].trigger()
+        self.assertEqual(bar.options.output_size(), (200, 120))
+        bar.custom_width.setValue(300)
+        self.assertEqual(bar.options.output_size(), (300, 180))
+        self.assertEqual(bar.resolution_button.text(), '300 × 180')
+        bar.countdown_button.custom_input.setValue(4)
+        bar.duration_button.custom_input.setValue(12)
+        self.assertEqual(bar.options.values()['countdown'], 4)
+        self.assertEqual(bar.options.values()['duration'], 12)
+        bar.options.save(self.settings)
+        restored = kapture.RecordingOptions(self.settings, (400, 240))
+        self.assertEqual(restored.values(), bar.options.values())
+        bar.reject(); bar.deleteLater(); restored.deleteLater()
+
     def test_cancel_setup_never_starts_recording(self):
-        with mock.patch.object(kapture.RecordSetupDialog, 'exec_', return_value=QtWidgets.QDialog.Rejected), \
+        with mock.patch.object(kapture.RecordSetupBar, 'exec_', return_value=QtWidgets.QDialog.Rejected), \
                 mock.patch.object(self.window, '_begin_recording') as begin:
             self.window._start_record(QtCore.QRect(10, 20, 200, 100))
         begin.assert_not_called()
@@ -52,7 +79,7 @@ class RecordingWorkflowTest(unittest.TestCase):
             dialog.options.countdown.setValue(2)
             dialog.options.duration.setValue(5)
             return QtWidgets.QDialog.Accepted
-        with mock.patch.object(kapture.RecordSetupDialog, 'exec_', new=accept), \
+        with mock.patch.object(kapture.RecordSetupBar, 'exec_', new=accept), \
                 mock.patch.object(self.window, '_begin_recording') as begin:
             self.window._start_record(QtCore.QRect(10, 20, 200, 100))
             self.assertIn('2', self.window._recbar.lbl.text())

@@ -243,7 +243,7 @@ class InlineEditingTest(unittest.TestCase):
         edit = self.open_capture()
         edit._region = QtCore.QRect(30, 40, 180, 100)
         self.draw(edit.canvas)
-        with mock.patch.object(kapture.RecordSetupDialog, 'exec_', return_value=QtWidgets.QDialog.Rejected):
+        with mock.patch.object(kapture.RecordSetupBar, 'exec_', return_value=QtWidgets.QDialog.Rejected):
             edit.finish('record')
         self.assertIs(self.w._inline_editor, edit)
         self.assertTrue(edit.isVisible())

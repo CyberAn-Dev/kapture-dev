@@ -102,6 +102,58 @@ class MainGroupedToolsTest(unittest.TestCase):
             self.window, QtCore.QPoint(self.window.btn_output.width(), 0)).x()
         self.assertLessEqual(abs(row_right - output_right), 1)
 
+    def test_editor_dropdown_icons_and_arrows_keep_a_gap_at_700px(self):
+        for language in ("zh", "en"):
+            with self.subTest(language=language):
+                kapture.set_lang(language)
+                self.window._retranslate()
+                self.window.resize(700, 660)
+                self.app.processEvents()
+
+                dropdowns = [button for button in self.window.findChildren(
+                    QtWidgets.QToolButton
+                ) if button.property("editorDropdown") and not button.isHidden()]
+                self.assertEqual(len(dropdowns), 9)
+                for button in dropdowns:
+                    self.assertEqual(button.size(), QtCore.QSize(40, 36))
+                    option = QtWidgets.QStyleOptionToolButton()
+                    button.initStyleOption(option)
+                    menu_rect = button.style().subControlRect(
+                        QtWidgets.QStyle.CC_ToolButton, option,
+                        QtWidgets.QStyle.SC_ToolButtonMenu, button)
+                    self.assertEqual(menu_rect.width(), 10)
+                    self.assertEqual(menu_rect.right(), button.rect().right())
+
+                    image = button.grab().toImage().convertToFormat(
+                        QtGui.QImage.Format_ARGB32)
+                    bright_columns = []
+                    for x in range(image.width()):
+                        for y in range(image.height()):
+                            color = image.pixelColor(x, y)
+                            if min(color.red(), color.green(), color.blue()) > 140 \
+                                    and max(color.red(), color.green(), color.blue()) > 200:
+                                bright_columns.append(x)
+                                break
+                    icon_columns = [x for x in bright_columns if x < 30]
+                    arrow_columns = [x for x in bright_columns if x >= 30]
+                    label = button.objectName() or button.toolTip()
+                    self.assertTrue(icon_columns, label)
+                    self.assertTrue(arrow_columns, label)
+                    gap = min(arrow_columns) - max(icon_columns) - 1
+                    self.assertGreaterEqual(gap, 5, label)
+                    arrow_right_margin = button.width() - 1 - max(arrow_columns)
+                    self.assertIn(arrow_right_margin, (1, 2), label)
+
+                for button in (self.window.btn_single, self.window.btn_scroll):
+                    self.assertEqual(button.styleSheet(), "")
+                row = self.window._annotation_row
+                output_right = self.window.btn_output.mapTo(
+                    self.window, QtCore.QPoint(self.window.btn_output.width(), 0)).x()
+                row_rect = row.geometry()
+                row_right = row.parentWidget().mapTo(
+                    self.window, QtCore.QPoint(row_rect.right() + 1, row_rect.y())).x()
+                self.assertLessEqual(abs(row_right - output_right), 1)
+
     def test_tool_menus_choose_one_canvas_tool_and_keep_group_highlights_exclusive(self):
         groups = getattr(self.window, "_main_tool_groups", {})
         self.assertEqual(set(groups), {"shape", "stroke", "line", "text", "mosaic",

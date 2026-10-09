@@ -35,6 +35,19 @@ def run():
             dialog.options.countdown.setValue(1)
             dialog.options.duration.setValue(2)
             dialog.show(); app.processEvents()
+            def type_custom_fps():
+                menu = dialog.fps_button.menu()
+                assert menu.isVisible()
+                field = dialog.fps_button.custom_input.lineEdit()
+                field.setFocus(); field.selectAll()
+                QtTest.QTest.keyClicks(field, '27')
+                menu.grab().save('/tmp/kapture-record-fps-menu.png')
+                QtTest.QTest.keyClick(field, QtCore.Qt.Key_Return)
+            QtCore.QTimer.singleShot(80, type_custom_fps)
+            dialog.fps_button.showMenu()
+            assert dialog.options.fps.value() == 27
+            next(action for action in dialog.fps_button.menu().actions() if action.text() == '10 fps').trigger()
+            assert not dialog.geometry().intersects(page.geometry())
             dialog.grab().save('/tmp/kapture-record-setup.png'); dialog.hide()
             return QtWidgets.QDialog.Accepted
 
@@ -73,7 +86,7 @@ def run():
             inline.finish('record')
             assert window._inline_editor is inline and inline.isVisible()
             assert window._recorder is None
-            with mock.patch.object(kapture.RecordSetupDialog, 'exec_', new=setup), \
+            with mock.patch.object(kapture.RecordSetupBar, 'exec_', new=setup), \
                     mock.patch.object(kapture.RecordExportDialog, 'exec_', new=export):
                 inline.finish('record')
                 assert window._inline_editor is None
