@@ -4737,11 +4737,11 @@ class MainWindow(QtWidgets.QWidget):
             border-bottom-right-radius:9px; }}
 
 
-        QToolButton[editorDropdown="true"] {{ padding:0px 8px 0px 0px; }}
-        QToolButton[editorDropdown="true"]::menu-button {{ width:10px; }}
+        QToolButton[editorDropdown="true"] {{ padding:0px 12px 0px 0px; }}
+        QToolButton[editorDropdown="true"]::menu-button {{ width:14px; }}
         QToolButton[editorDropdown="true"]::menu-arrow {{
             subcontrol-origin:padding; subcontrol-position:center right;
-            right:1px; width:8px; height:8px;
+            right:5px; width:8px; height:8px;
         }}
 
         QToolButton#outputMenuButton {{ padding:0px 14px 0px 6px; }}

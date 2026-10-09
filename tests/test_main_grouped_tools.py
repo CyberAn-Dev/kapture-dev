@@ -121,7 +121,7 @@ class MainGroupedToolsTest(unittest.TestCase):
                     menu_rect = button.style().subControlRect(
                         QtWidgets.QStyle.CC_ToolButton, option,
                         QtWidgets.QStyle.SC_ToolButtonMenu, button)
-                    self.assertEqual(menu_rect.width(), 10)
+                    self.assertGreaterEqual(menu_rect.width(), 14)
                     self.assertEqual(menu_rect.right(), button.rect().right())
 
                     image = button.grab().toImage().convertToFormat(
@@ -134,15 +134,21 @@ class MainGroupedToolsTest(unittest.TestCase):
                                     and max(color.red(), color.green(), color.blue()) > 200:
                                 bright_columns.append(x)
                                 break
-                    icon_columns = [x for x in bright_columns if x < 30]
-                    arrow_columns = [x for x in bright_columns if x >= 30]
+                    icon_columns = [x for x in bright_columns if x < 27]
+                    arrow_columns = [x for x in bright_columns if x >= 27]
                     label = button.objectName() or button.toolTip()
                     self.assertTrue(icon_columns, label)
                     self.assertTrue(arrow_columns, label)
                     gap = min(arrow_columns) - max(icon_columns) - 1
-                    self.assertGreaterEqual(gap, 5, label)
+                    self.assertGreaterEqual(gap, 3, label)
                     arrow_right_margin = button.width() - 1 - max(arrow_columns)
-                    self.assertIn(arrow_right_margin, (1, 2), label)
+                    self.assertGreaterEqual(arrow_right_margin, 5, label)
+                    self.assertTrue(menu_rect.contains(QtCore.QPoint(
+                        min(arrow_columns), button.height() // 2)), label)
+                    if button is self.window._main_tool_groups["shape"][0]:
+                        pair_center = (min(icon_columns) + max(arrow_columns)) / 2
+                        self.assertLessEqual(abs(pair_center -
+                            (button.width() - 1) / 2), 1, label)
 
                 for button in (self.window.btn_single, self.window.btn_scroll):
                     self.assertEqual(button.styleSheet(), "")
