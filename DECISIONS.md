@@ -101,9 +101,9 @@
 
 - Keep the current repository-backed application as the local working version and publish its application, test, install and documentation changes together to `origin/main`. Exclude `.serena/` tooling state and generated/runtime artifacts; no `.deb` release is implied by the source push.
 
-## Product documentation (2026-10-08)
+## Product documentation (2026-10-09)
 
-- Maintain matching English and Chinese product READMEs for this fork. Point installation and contribution links at CyberAn-Dev/kapture-dev while retaining upstream attribution. Document local package building without implying a published fork release; use actual current Qt widget captures with demonstration content and isolated settings for product screenshots. Lead with the Linux X11 PixPin-alternative positioning, inspired by the Flameshot README structure (https://github.com/flameshot-org/flameshot#readme). Keep independent upstream attribution and state that this is workflow coverage, not complete PixPin feature parity; retain concrete limitations.
+- Maintain matching English and Chinese product READMEs for this fork. Point installation and contribution links at CyberAn-Dev/kapture-dev while retaining upstream attribution. Document local package building without implying a published fork release; use actual current Qt widget captures with demonstration content and isolated settings for product screenshots. Show the current editor, fixed inline capture, recording toolbar and concise settings in Vitesse Dark; keep secondary screenshots collapsible and avoid enlarging small images beyond their native width. Lead with the Linux X11 PixPin-alternative positioning, inspired by the Flameshot README structure (https://github.com/flameshot-org/flameshot#readme). Keep independent upstream attribution and state that this is workflow coverage, not complete PixPin feature parity; retain concrete limitations.
 
 ## Shared editing and persistent history (2026-10-08)
 

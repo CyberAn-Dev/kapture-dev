@@ -4,11 +4,11 @@
 
 # Kapture Dev
 
-**An open-source PixPin alternative for Linux**
+**An open-source PixPin alternative for Linux X11**
 
 Screenshots · Scrolling capture · OCR · Pinned images · Annotation · Recording
 
-Capture, extract text, and keep visual references at hand on Linux X11.
+Capture, annotate, extract text, and keep visual references at hand in one X11 workflow.
 
 [简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Features](#features) · [Report an issue](https://github.com/CyberAn-Dev/kapture-dev/issues)
 
@@ -21,27 +21,45 @@ Capture, extract text, and keep visual references at hand on Linux X11.
 
 <img src="docs/images/editor.png" alt="Kapture Dev editor" width="900" />
 
-<sub>Current editor with demonstration content and OCR results.</sub>
+<sub>Full editor with annotations, OCR results, and the output menu. Screenshots use sample content.</sub>
 
 </div>
 
+<details>
+<summary>In-place editing and recording controls</summary>
+
+<div align="center">
+
+<img src="docs/images/capture.png" alt="Resize the blue selection and annotate immediately." width="900" />
+
+<sub>Resize the blue selection and annotate immediately.</sub>
+
+<img src="docs/images/recording.png" alt="Choose frame rate, resolution, countdown, and duration from dropdowns." width="525" />
+
+<sub>Choose frame rate, resolution, countdown, and duration from dropdowns.</sub>
+
+</div>
+
+</details>
+
 ## A familiar capture workflow
 
-- **Capture and explain**: select a region or snap to a window, add arrows, numbered steps, or mosaic, then copy and share.
-- **Get text out of images**: use automatic OCR, select part of an image, or grab text directly from the screen.
+- **Capture and explain**: every capture opens in inline editing. Select a region or window, add arrows, numbered steps, or mosaic, then copy or save; open the full editor when you need more space.
+- **Get text out of images**: open a capture in the full editor for automatic OCR, select words in the image, or grab text directly from the screen.
 - **Keep references beside your work**: pin clipboard images, zoom, and adjust opacity.
-- **Go beyond one screen**: capture automatically or scroll manually, revisiting content without appending it twice.
+- **Go beyond one screen**: capture automatically or scroll manually inside a red frame, with live preview and duplicate-aware stitching.
 
 ## Features
 
 | Tool | What it does |
 | --- | --- |
-| Capture | Resize the blue selection with eight handles and a pixel loupe; use grouped tools in a single-row toolbar. |
-| Scrolling capture | Start manual scrolling in the red frame from the toolbar; automatic up/down modes, live preview, and duplicate-aware stitching. |
-| OCR | Chinese and English recognition, automatic OCR after capture, editor text selection, and screen text grab. |
+| Capture | Resize the blue selection with eight handles and a pixel loupe; use grouped tools in a single-row toolbar and edit immediately in place. |
+| Scrolling capture | Start a red-frame capture from the toolbar; manual and automatic up/down modes provide a live preview and duplicate-aware stitching. |
+| OCR | Chinese and English recognition, word selection in images, and screen text grab; opening a capture in the full editor runs OCR by default. |
 | Pin images | Keep images on top, zoom, adjust opacity, annotate with the grouped toolbar, and drag across recognized words to copy. |
-| Edit and save | Undo/redo, move/delete annotations, change color/width, type directly on the canvas and double-click to edit text, crop, and save the annotated image at its original size. |
-| Record | A region-adjacent recording toolbar from inline capture and the editor: dropdown presets and custom inputs for frame rate, resolution, countdown and duration. Choose MP4, GIF or MKV afterwards, with multiple exports and progress feedback. |
+| Edit and save | Undo/redo, move/delete annotations, change color/width, type directly on the canvas and double-click to edit text, crop, and save original-size PNG or JPEG images with annotations. |
+| Record | Use the region-adjacent recording toolbar from inline capture or the editor. Choose frame rate, resolution, countdown, and duration; export MP4, GIF, or MKV afterwards, with progress and multiple exports. |
+| History | Keep up to 10 screenshot entries with timestamps and 10 clipboard-image entries on this machine; both collections survive restarts. |
 | Desktop | GNOME and KDE Plasma 5 shortcuts, themes, system tray, and background launch. |
 
 The app has English and Simplified Chinese interfaces. OCR uses Tesseract; screen recording uses ffmpeg.
@@ -77,9 +95,9 @@ Upstream [releases](https://github.com/ycwei5/kapture/releases) contain the upst
 
 <div align="center">
 
-<img src="docs/images/settings.png" alt="Kapture Dev settings" width="660" />
+<img src="docs/images/settings.png" alt="Kapture Dev settings" width="560" />
 
-<sub>Configure shortcuts, capture behavior, OCR, and appearance.</sub>
+<sub>Configure shortcuts, capture behavior, OCR and recording defaults, and appearance.</sub>
 
 </div>
 
@@ -98,13 +116,13 @@ GNOME restores saved Kapture shortcuts at startup. Change conflicting combinatio
 | Delete selected annotation | Delete |
 | Stop scrolling capture / close focused pin | Esc |
 
-Captures open in-place editing: Enter copies, Esc cancels, and the toolbar opens the full editor. Right-click a pin to annotate or select text; restore click-through pins from the tray.
+Captures always open in-place editing: Enter copies, Esc cancels, and **Open in editor** hands the image to the full editor. Right-click a pin to annotate or select text; restore click-through pins from the tray.
 
-To capture Kapture itself, enable **Keep the main window visible during screenshots** in **Settings → General**. Capture shortcuts also work while Settings is open and preserve unsaved changes.
+To capture Kapture itself, enable **Keep main window during capture** in **Settings → General**. Capture shortcuts also work while Settings is open and preserve unsaved changes.
 
-Scroll speed lives in the scrolling-capture menu; screenshot delay lives in the capture menu. Recording has its own countdown and duration settings.
+Scroll speed lives in the scrolling-capture menu; screenshot delay lives in the capture menu. Recording has its own frame rate, resolution, countdown, and duration controls, followed by format selection after capture.
 
-History stays on this machine and survives restarts: up to 10 screenshots and 10 clipboard images, with a separate 40-million-pixel budget per collection; the newest image is always retained. Clear both collections from the history window.
+History stays on this machine and survives restarts: up to 10 screenshots with capture timestamps and 10 clipboard images, with a separate 40-million-pixel budget per collection; the newest image is always retained. Clear both collections from the history window.
 
 ## Command line
 
@@ -115,7 +133,7 @@ Run one action with `./run.sh <option>`, for example `./run.sh --region`.
 
 ## How it differs from PixPin
 
-Kapture Dev is an independent open-source fork of [Kapture](https://github.com/ycwei5/kapture), not affiliated with [PixPin](https://pixpin.cn/). It covers everyday screenshot, scrolling capture, OCR, and pinning workflows rather than full feature parity. OCR translation, QR recognition, and recording audio are not currently provided.
+Kapture Dev is an independent open-source fork of [Kapture](https://github.com/ycwei5/kapture), not affiliated with [PixPin](https://pixpin.cn/). It is a focused Linux X11 replacement for PixPin's everyday screenshot workflow: inline editing, OCR, scrolling capture, pinning, and recording are available in one app, while the overall feature set is narrower. OCR translation, QR recognition, and recording audio are not currently provided.
 
 - X11 only; Wayland is not supported. In-app global shortcut setup is available on GNOME and KDE Plasma 5.
 - Scrolling capture is limited to 40,000 pixels in height. Dynamic pages, overlays, lazy loading, and repeated content can affect alignment; it is not a browser full-page export.
