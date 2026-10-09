@@ -361,8 +361,18 @@ def line_icon(name, color="#d2d2da", size=22):
             L(cx, cy, cx + 5 * dx, cy); L(cx, cy, cx, cy + 5 * dy)
     elif name == "window":
         Rr(4, 5, 16, 14, 2); L(4, 9.5, 20, 9.5)
-    elif name == "scroll":
-        Rr(6, 3, 12, 18, 2); L(12, 7, 12, 15); head(12, 16, math.pi / 2)
+    elif name in ("scroll", "scroll_down", "scroll_up"):
+        # Keep the page outline, but make the direction explicit.  The
+        # generic scroll icon is used by the inline editor's manual-scroll
+        # action, while the menu actions use the single-direction variants.
+        Rr(5, 3, 14, 18, 2)
+        if name == "scroll_up":
+            L(12, 16, 12, 8); head(12, 8, -math.pi / 2, 3.5)
+        elif name == "scroll_down":
+            L(12, 8, 12, 16); head(12, 16, math.pi / 2, 3.5)
+        else:
+            L(12, 7, 12, 12); head(12, 7, -math.pi / 2, 3.5)
+            L(12, 12, 12, 17); head(12, 17, math.pi / 2, 3.5)
     elif name == "manual":
         Rr(7, 4, 10, 16, 3); L(12, 8, 12, 16)
         head(12, 7.5, -math.pi / 2, 3.5); head(12, 16.5, math.pi / 2, 3.5)
@@ -988,70 +998,75 @@ def locate_frame(canvas_bgr, frame_bgr, y_hint=0, band=2400, conf_min=0.8):
     fg = cv2.cvtColor(frame_bgr[:, columns], cv2.COLOR_BGR2GRAY)
     strip_h = min(h, max(24, h // 4))
     anchor_bases = tuple(dict.fromkeys((0, (h-strip_h)//2, h-strip_h)))
-    anchors, candidates = [], set()
+    anchors = [(base, fg[base:base+strip_h]) for base in anchor_bases
+               if fg[base:base+strip_h].std() >= 2 and cg.shape[0] >= strip_h]
     confidence = 0.0
-    for base in anchor_bases:
-        strip = fg[base:base+strip_h]
-        if strip.std() < 2 or cg.shape[0] < strip_h:
-            continue
-        anchors.append((base, strip))
-        scores = cv2.matchTemplate(cg, strip, cv2.TM_CCOEFF_NORMED).ravel()
-        confidence = max(confidence, float(scores.max()))
-        # Bound work even on repeated table rows; ambiguity is rejected below.
-        for _ in range(8):
-            loc = int(scores.argmax())
-            if scores[loc] < conf_min:
-                break
-            candidates.add(y0+loc-base)
-            scores[max(0, loc-2):loc+3] = -1
-    ranked = []
-    for y in candidates:
-        # A changed image or lazy-loaded block can invalidate one anchor. For
-        # larger viewports, require two separated strips to support the same
-        # offset before tolerating local differences in the full overlap.
-        independent_anchors = 0
-        covered_anchors = 0
+    # Only compress horizontally: candidate offsets retain exact row positions.
+    # Full-size anchors and overlap pixels still decide whether to accept them.
+    for match_width in dict.fromkeys((min(320, cg.shape[1]), cg.shape[1])):
+        candidates = set()
+        search = (cv2.resize(cg, (match_width, cg.shape[0]), interpolation=cv2.INTER_AREA)
+                  if match_width < cg.shape[1] else cg)
         for base, strip in anchors:
-            anchor_y = y + base
-            if anchor_y < y0 or anchor_y + strip_h > y1:
+            template = (cv2.resize(strip, (match_width, strip_h), interpolation=cv2.INTER_AREA)
+                        if match_width < strip.shape[1] else strip)
+            scores = cv2.matchTemplate(search, template, cv2.TM_CCOEFF_NORMED).ravel()
+            confidence = max(confidence, float(scores.max()))
+            for _ in range(8):
+                loc = int(scores.argmax())
+                if scores[loc] < conf_min:
+                    break
+                candidates.add(y0+loc-base)
+                scores[max(0, loc-2):loc+3] = -1
+        ranked = []
+        for y in candidates:
+            # A changed image or lazy-loaded block can invalidate one anchor. For
+            # larger viewports, require two separated strips to support the same
+            # offset before tolerating local differences in the full overlap.
+            independent_anchors = 0
+            covered_anchors = 0
+            for base, strip in anchors:
+                anchor_y = y + base
+                if anchor_y < y0 or anchor_y + strip_h > y1:
+                    continue
+                covered_anchors += 1
+                anchor = cg[anchor_y-y0:anchor_y-y0+strip_h]
+                score = float(cv2.matchTemplate(
+                    anchor, strip, cv2.TM_CCOEFF_NORMED
+                )[0, 0])
+                independent_anchors += score >= conf_min
+            multi_anchor = covered_anchors >= 2
+            lo, hi = max(y0, y), min(y1, y+h)
+            if hi-lo < strip_h:
                 continue
-            covered_anchors += 1
-            anchor = cg[anchor_y-y0:anchor_y-y0+strip_h]
-            score = float(cv2.matchTemplate(
-                anchor, strip, cv2.TM_CCOEFF_NORMED
-            )[0, 0])
-            independent_anchors += score >= conf_min
-        multi_anchor = covered_anchors >= 2
-        lo, hi = max(y0, y), min(y1, y+h)
-        if hi-lo < strip_h:
-            continue
-        delta = np.abs(cg[lo-y0:hi-y0].astype(np.int16) -
-                       fg[lo-y:hi-y].astype(np.int16))
-        error = float(delta.mean())
-        # Preserve the original whole-overlap acceptance for small, possibly
-        # separated changes. Larger local animation may use a stricter fallback
-        # only when two anchors independently support the same offset.
-        inconsistent_rows = np.count_nonzero(delta > 16, axis=1) > max(2, fg.shape[1] * 0.003)
-        if error <= 12 and inconsistent_rows.mean() <= 0.1:
+            delta = np.abs(cg[lo-y0:hi-y0].astype(np.int16) -
+                           fg[lo-y:hi-y].astype(np.int16))
+            error = float(delta.mean())
+            # Preserve the original whole-overlap acceptance for small, possibly
+            # separated changes. Larger local animation may use a stricter fallback
+            # only when two anchors independently support the same offset.
+            inconsistent_rows = np.count_nonzero(delta > 16, axis=1) > max(2, fg.shape[1] * 0.003)
+            if error <= 12 and inconsistent_rows.mean() <= 0.1:
+                ranked.append((error, y))
+                continue
+            if (error > 12 or not multi_anchor or independent_anchors < 2):
+                continue
+            changed_rows = np.flatnonzero(inconsistent_rows)
+            if len(changed_rows) and len(changed_rows) != int(
+                    changed_rows[-1] - changed_rows[0] + 1):
+                continue
             ranked.append((error, y))
+        ranked.sort()
+        if not ranked:
             continue
-        if (error > 12 or not multi_anchor or independent_anchors < 2):
+        error, y = ranked[0]
+        tolerance = max(0.001, error * 0.1)
+        if any(abs(other-y) > 2 and err <= error+tolerance for err, other in ranked[1:]):
             continue
-        changed_rows = np.flatnonzero(inconsistent_rows)
-        if len(changed_rows) and len(changed_rows) != int(
-                changed_rows[-1] - changed_rows[0] + 1):
-            continue
-        ranked.append((error, y))
-    ranked.sort()
-    if not ranked:
-        return None, min(confidence, 0.49)
-    error, y = ranked[0]
-    # On a static text page only a few glyph pixels may distinguish rows.
-    # A fixed one-level mean tolerance incorrectly erases that evidence.
-    tolerance = max(0.001, error * 0.1)
-    if any(abs(other-y) > 2 and err <= error+tolerance for err, other in ranked[1:]):
-        return None, 0.0
-    return y, max(conf_min, 1-error/255)
+        return y, max(conf_min, 1-error/255)
+    # A narrow proposal may lose small glyph detail; retry full width before
+    # declaring a gap or an ambiguous repeated row.
+    return None, min(confidence, 0.49)
 
 
 def stitch_frame(canvas_bgr, frame_bgr, y):
@@ -1189,7 +1204,7 @@ class CaptureWorker(QThread):
                 iteration += 1
                 if mouse is not None:
                     mouse.scroll(0, -self.direction*self.scroll_clicks)
-                time.sleep(0.25 if self.manual else self.settle)
+                time.sleep(0.08 if self.manual else self.settle)
                 cur = self._grab()
                 if cur is None:
                     break
@@ -4240,6 +4255,8 @@ class MainWindow(QtWidgets.QWidget):
         self._scroll_menu = QtWidgets.QMenu(self.btn_scroll)
         self._scroll_down_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(1))
         self._scroll_up_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(-1))
+        self._scroll_down_action.setIcon(line_icon("scroll_down", size=22))
+        self._scroll_up_action.setIcon(line_icon("scroll_up", size=22))
         self.btn_scroll.setMenu(self._scroll_menu)
         self.btn_scroll.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         self.btn_scroll.setFixedWidth(40)
@@ -4697,6 +4714,8 @@ class MainWindow(QtWidgets.QWidget):
             button.setIcon(icon)
             for action_name, action in self._main_tool_actions[key].items():
                 action.setIcon(line_icon(action_name, colors["icon"], size=22))
+        self._scroll_down_action.setIcon(line_icon("scroll_down", colors["icon"], size=22))
+        self._scroll_up_action.setIcon(line_icon("scroll_up", colors["icon"], size=22))
         output_icons = {"ocr": "ocr", "copy": "copy", "pin": "pin",
                         "save": "save", "beautify": "beautify"}
         for name, action in self._output_actions.items():

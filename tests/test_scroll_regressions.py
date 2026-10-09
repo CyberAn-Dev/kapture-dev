@@ -36,6 +36,31 @@ class ScrollRegressionTest(unittest.TestCase):
             origin = min(origin, top)
         np.testing.assert_array_equal(canvas, page[100:1100])
 
+    def test_wide_text_page_down_up_keeps_exact_rows(self):
+        page = np.full((1600, 1200, 3), 245, np.uint8)
+        for row in range(0, 1600, 28):
+            kapture.cv2.putText(page, f"Row {row:04d} wide screenshot 0123456789",
+                               (20, row+21), kapture.cv2.FONT_HERSHEY_SIMPLEX,
+                               .6, (25, 25, 25), 1)
+        canvas, hint, origin = page[400:1120].copy(), 0, 400
+        for top in (550, 250, 100, 400, 700):
+            frame = page[top:top+720]
+            y, _ = kapture.locate_frame(canvas, frame, hint)
+            self.assertEqual(y, top-origin)
+            canvas, hint = kapture.stitch_frame(canvas, frame, y)
+            origin = min(origin, top)
+        np.testing.assert_array_equal(canvas, page[100:1420])
+
+    def test_full_width_search_recovers_when_small_proposal_has_no_match(self):
+        page = np.random.RandomState(72).randint(0, 256, (900, 700, 3), dtype=np.uint8)
+        match = kapture.cv2.matchTemplate
+        def lose_narrow_detail(image, template, method):
+            if image.shape[1] == 320 and image.shape[0] > template.shape[0]:
+                return np.zeros((image.shape[0]-template.shape[0]+1, 1), np.float32)
+            return match(image, template, method)
+        with mock.patch.object(kapture.cv2, "matchTemplate", side_effect=lose_narrow_detail):
+            self.assertEqual(kapture.locate_frame(page[:400], page[100:500])[0], 100)
+
     def test_preview_uses_thumbnail_aspect_and_original_height(self):
         hud = kapture.ScrollHud(QtCore.QRect(0, 0, 400, 300), lambda: None)
         self.addCleanup(hud.close)
