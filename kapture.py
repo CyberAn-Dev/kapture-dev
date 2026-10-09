@@ -171,6 +171,7 @@ TR = {
     "a_number": {"zh": "序号", "en": "Number"},
     "a_highlight": {"zh": "高亮", "en": "Highlight"},
     "a_blur": {"zh": "打码", "en": "Blur"},
+    "a_gaussian_blur": {"zh": "高斯模糊", "en": "Gaussian blur"},
     "a_magnify": {"zh": "放大镜", "en": "Magnifier"},
     "a_crop": {"zh": "裁剪", "en": "Crop"},
     "a_color": {"zh": "标注颜色", "en": "Annotation color"},
@@ -302,11 +303,13 @@ def swatch_icon(color, size=20):
 def line_icon(name, color="#d2d2da", size=22):
     """Hand-drawn monochrome line icon (original vector, no external assets)."""
     import math
-    pm = QtGui.QPixmap(size, size)
+    dpr = max(1.0, QtWidgets.QApplication.instance().devicePixelRatio())
+    pm = QtGui.QPixmap(round(size * dpr), round(size * dpr))
+    pm.setDevicePixelRatio(dpr)
     pm.fill(Qt.transparent)
     p = QtGui.QPainter(pm)
     p.setRenderHint(QtGui.QPainter.Antialiasing)
-    pen = QtGui.QPen(QtGui.QColor(color), max(1.5, size / 13.0))
+    pen = QtGui.QPen(QtGui.QColor(color), size * 1.65 / 24.0)
     pen.setCapStyle(Qt.RoundCap); pen.setJoinStyle(Qt.RoundJoin)
     p.setPen(pen); p.setBrush(Qt.NoBrush)
     u = size / 24.0
@@ -317,9 +320,6 @@ def line_icon(name, color="#d2d2da", size=22):
         rc = QtCore.QRectF(x * u, y * u, w * u, h * u)
         (p.drawRoundedRect(rc, r * u, r * u) if r else p.drawRect(rc))
     def Ell(x, y, w, h): p.drawEllipse(QtCore.QRectF(x * u, y * u, w * u, h * u))
-    def glyph(ch, frac=0.7):
-        f = p.font(); f.setPixelSize(int(size * frac)); f.setBold(True); p.setFont(f)
-        p.drawText(QtCore.QRectF(0, 0, size, size), Qt.AlignCenter, ch)
     def head(x, y, ang, ln=5):
         for da in (math.radians(150), math.radians(-150)):
             p.drawLine(Pt(x, y), Pt(x + ln * math.cos(ang + da),
@@ -345,85 +345,81 @@ def line_icon(name, color="#d2d2da", size=22):
         head(16.5, 7.5, math.radians(20))
     elif name == "history":
         Ell(4, 4, 16, 16); L(12, 12, 12, 7.5); L(12, 12, 15.5, 13.5)
-    elif name == "settings":   # gear: toothed outline polygon + hub
-        path = QtGui.QPainterPath()
-        n, step, tw = 7, 2 * math.pi / 7.0, 0.42
-        first = True
-        for k in range(n):
-            a0 = k * step
-            for (r, a) in [(7.0, a0), (9.5, a0 + step * 0.10),
-                           (9.5, a0 + step * (0.10 + tw)), (7.0, a0 + step * (0.20 + tw))]:
-                q = Pt(12 + r * math.cos(a), 12 + r * math.sin(a))
-                if first:
-                    path.moveTo(q); first = False
-                else:
-                    path.lineTo(q)
-        path.closeSubpath()
-        p.drawPath(path)
-        Ell(8.8, 8.8, 6.4, 6.4)
+    elif name == "settings":
+        # Three quiet, balanced sliders instead of a dense gear at small sizes.
+        L(5, 5, 5, 7); L(5, 11, 5, 19); Ell(3, 7, 4, 4)
+        L(12, 5, 12, 13); L(12, 17, 12, 19); Ell(10, 13, 4, 4)
+        L(19, 5, 19, 9); L(19, 13, 19, 19); Ell(17, 9, 4, 4)
+    elif name == "editor":
+        Rr(3.5, 4, 17, 16, 2)
+        L(7, 8, 14, 8); L(7, 11.5, 14, 11.5)
+        L(7, 15, 11, 15); L(16.5, 14.5, 20, 18)
+        L(20, 14.5, 16.5, 18)
     elif name == "ocr":
-        if _LANG == "en":
-            glyph("OCR", 0.4)
-        else:
-            glyph("字", 0.78)
+        for cx, cy, dx, dy in [(4,4,1,1),(20,4,-1,1),(4,20,1,-1),(20,20,-1,-1)]:
+            L(cx,cy,cx+3*dx,cy); L(cx,cy,cx,cy+3*dy)
+        L(8,9,16,9); L(12,9,12,16); L(10,16,14,16)
     elif name == "copy":
-        Rr(8, 8, 11, 11, 2); Rr(5, 5, 11, 11, 2)
+        path=QtGui.QPainterPath(Pt(7,16))
+        path.lineTo(Pt(6,16));path.quadTo(Pt(4,16),Pt(4,14))
+        path.lineTo(Pt(4,6));path.quadTo(Pt(4,4),Pt(6,4))
+        path.lineTo(Pt(14,4));path.quadTo(Pt(16,4),Pt(16,6));path.lineTo(Pt(16,7))
+        p.drawPath(path);Rr(8,8,12,12,2.5)
     elif name == "pin":
-        L(12, 13, 12, 19); Ell(8, 5, 8, 8)
+        path=QtGui.QPainterPath(Pt(8,4))
+        for x,y in [(16,4),(15,11),(18,14),(6,14),(9,11),(8,4)]:
+            path.lineTo(Pt(x,y))
+        p.drawPath(path);L(12,14,12,21)
     elif name == "beautify":   # sparkle/star
         for (cx, cy, s) in [(11, 11, 6), (17, 6, 2.6)]:
             L(cx - s, cy, cx + s, cy); L(cx, cy - s, cx, cy + s)
     elif name == "save":
         L(12, 4, 12, 15); head(12, 15, math.pi / 2); L(6, 19, 18, 19)
     elif name == "rect":
-        Rr(5, 6, 14, 12, 1)
+        Rr(4, 6, 16, 12, 2.5)
     elif name == "ellipse":
-        Ell(5, 6, 14, 12)
+        Ell(4, 6, 16, 12)
     elif name == "arrow":
         L(6, 18, 17, 7); head(17, 7, math.radians(-45))
     elif name == "line":
         L(6, 18, 18, 6)
     elif name == "pen":
-        # pencil: two parallel strokes as the body, a filled nib, and a short
-        # squiggle under it so it reads as "freehand draw" at small sizes
-        L(8.5, 15, 16.5, 7); L(11, 17.5, 19, 9.5)
-        p.setBrush(QtGui.QColor(color))
-        p.drawPolygon(QtGui.QPolygonF([Pt(8.5, 15), Pt(11, 17.5), Pt(6.5, 19.5)]))
-        p.setBrush(Qt.NoBrush)
-        path = QtGui.QPainterPath(Pt(3, 22))
-        path.cubicTo(Pt(5, 20), Pt(6, 23.5), Pt(8.5, 21.5))
-        p.drawPath(path)
+        path=QtGui.QPainterPath(Pt(5,19))
+        for x,y in [(6,14),(16,4),(20,8),(10,18),(5,19)]:
+            path.lineTo(Pt(x,y))
+        p.drawPath(path);L(14,6,18,10);L(6,14,10,18)
     elif name == "text":
-        glyph("T", 0.8)
+        L(5,7,5,5);L(5,5,19,5);L(19,5,19,7)
+        L(12,5,12,19);L(9,19,15,19)
     elif name == "number":
-        Ell(5, 5, 14, 14); glyph("1", 0.5)
+        Ell(4,4,16,16);L(10,10,12,8);L(12,8,12,16);L(10,16,14,16)
     elif name == "highlight":
-        pen2 = QtGui.QPen(QtGui.QColor(color), 5 * u); pen2.setCapStyle(Qt.FlatCap)
-        p.setPen(pen2); L(7, 11, 17, 11)
-        p.setPen(pen); L(6, 18, 18, 18)
-    elif name == "blur":       # mosaic
-        for ix in range(3):
-            for iy in range(3):
-                if (ix + iy) % 2 == 0:
-                    p.fillRect(QtCore.QRectF((6 + ix * 4) * u, (6 + iy * 4) * u,
-                                             3.4 * u, 3.4 * u), QtGui.QColor(color))
-                else:
-                    Rr(6 + ix * 4, 6 + iy * 4, 3.4, 3.4)
+        path=QtGui.QPainterPath(Pt(6,14))
+        for x,y in [(14,6),(19,11),(11,19),(6,14)]:
+            path.lineTo(Pt(x,y))
+        p.drawPath(path);L(5,19,8,16);L(4,21,12,21)
+    elif name == "blur":
+        for x,y in [(5,5),(13,5),(5,13),(13,13)]:
+            Rr(x,y,6,6,1.2)
+    elif name == "gaussian":
+        Ell(4,4,16,16)
+        for x,y in [(9,9),(15,9),(9,15),(15,15)]:
+            p.setBrush(QtGui.QColor(color));Ell(x-0.8,y-0.8,1.6,1.6)
+        p.setBrush(Qt.NoBrush)
     elif name == "magnify":
-        Ell(5, 5, 10, 10); L(14, 14, 19, 19)
+        Ell(4, 4, 12, 12); L(14.5, 14.5, 20, 20)
     elif name == "crop":
         L(8, 4, 8, 17); L(8, 17, 20, 17); L(4, 7, 16, 7); L(16, 7, 16, 20)
     elif name == "select":
         p.drawPolygon(QtGui.QPolygonF([Pt(6,3),Pt(6,20),Pt(11,15),Pt(18,15)]))
-    elif name == "redo":
-        path = QtGui.QPainterPath(Pt(7,19))
-        path.cubicTo(Pt(4,12),Pt(9,7),Pt(14.5,8.5)); p.drawPath(path)
-        L(14.5,8.5,11.5,6); L(14.5,8.5,11,11)
-    elif name == "undo":       # ↩ loop-back arrow
-        path = QtGui.QPainterPath(Pt(17, 19))
-        path.cubicTo(Pt(20, 12), Pt(15, 7), Pt(9.5, 8.5))
-        p.drawPath(path)
-        L(9.5, 8.5, 12.5, 6); L(9.5, 8.5, 13, 11)
+    elif name in ("undo", "redo"):
+        if name == "redo":
+            p.translate(size,0);p.scale(-1,1)
+        path=QtGui.QPainterPath(Pt(5,9))
+        path.lineTo(Pt(14,9));path.cubicTo(Pt(22,9),Pt(22,19),Pt(14,19))
+        p.drawPath(path);L(5,9,9,5);L(5,9,9,13)
+        if name == "redo":
+            p.scale(-1,1);p.translate(-size,0)
     elif name == "clear":      # trash can
         L(5, 7, 19, 7); Rr(7, 7, 10, 13, 1); L(10, 5, 14, 5)
         L(10, 10, 10, 17); L(14, 10, 14, 17)
@@ -1352,7 +1348,7 @@ class RegionSelector(QtWidgets.QWidget):
         hint = ("Drag to select a region, Esc to cancel" if self.mode == "region"
                 else "Move to a pixel, click to pick color, Esc to cancel")
         p.setPen(QtGui.QColor(255, 255, 255, 220))
-        p.drawText(20, 30, hint)
+        p.drawText(20, 30, getattr(self,"hint_text",hint))
 
         if (self.mode == "region" and self.origin is None and self._hover
                 and self.snap):
@@ -1749,6 +1745,7 @@ class AnnotateCanvas(QtWidgets.QWidget):
         self._undo_stack = []
         self._redo_stack = []
         self._history_limit = 100
+        self.blur_style = "pixelate"
         self.color = QtGui.QColor(255, 40, 40)
         self.width = 3
         self.setFocusPolicy(Qt.StrongFocus)
@@ -2076,6 +2073,14 @@ class AnnotateCanvas(QtWidgets.QWidget):
         if r.width() < 2 or r.height() < 2:
             return
         sub = self.base.copy(r)
+        if it.get("blur_style", "pixelate") == "gaussian":
+            bgr = qimage_to_bgr(sub)
+            kernel = max(3, int(it.get("width", self.width)) * 4 + 1)
+            if kernel % 2 == 0:
+                kernel += 1
+            blurred = cv2.GaussianBlur(bgr, (kernel, kernel), 0)
+            p.drawImage(r.topLeft(), bgr_to_qimage(blurred))
+            return
         factor = max(4, it["width"] * 3)            # mosaic block size scales with line width
         small = sub.scaled(max(1, r.width() // factor), max(1, r.height() // factor),
                            Qt.IgnoreAspectRatio, Qt.FastTransformation)
@@ -2257,6 +2262,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
             self._commit_change(before)
             return
         base = {"color": QtGui.QColor(self.color), "width": self.width}
+        if self.tool == "blur":
+            base["blur_style"] = self.blur_style
         if self.tool == "pen":
             self.cur = dict(base, type="pen", pts=[pt])
         else:
@@ -2400,12 +2407,52 @@ class AnnotateCanvas(QtWidgets.QWidget):
 # --------------------------------------------------------------------------- #
 # Floating thumbnail shown after a capture (bottom-left)
 # --------------------------------------------------------------------------- #
+class CompactStatusLabel(QtWidgets.QLabel):
+    """A one-line status hint above its toolbar, without changing toolbar width."""
+    def __init__(self, parent, anchor):
+        super().__init__(parent)
+        self._anchor = anchor
+        self.setStyleSheet('QLabel{color:#eeeeef;background:#24242c;'
+                           'border:1px solid #626273;border-radius:4px;padding:3px 7px;}')
+        self.setWordWrap(False)
+        self.setMaximumWidth(420)
+        self.hide()
+
+    def setText(self, text):
+        super().setText(text)
+        if not text:
+            self.hide()
+            return
+        self.setToolTip(text)
+        self.adjustSize()
+        self.show()
+        self.reposition()
+        self.raise_()
+
+    def reposition(self):
+        if self.isHidden() or self._anchor is None or self.parentWidget() is None:
+            return
+        self.adjustSize()
+        parent = self.parentWidget()
+        toolbar_top = parent.mapFromGlobal(self._anchor.mapToGlobal(QtCore.QPoint(0, 0)))
+        x = max(0, min(toolbar_top.x(), parent.width() - self.width()))
+        y = toolbar_top.y() - self.height() - 4
+        if y < 0:
+            y = toolbar_top.y() + self._anchor.height() + 4
+        y = max(0, min(y, parent.height() - self.height()))
+        self.move(x, y)
+
+
 class EditTools(QtWidgets.QFrame):
     """Shared controls for the existing canvas in pins and capture-time editing."""
     _retired = set()
 
-    def __init__(self, canvas, parent=None):
+    _tool_names = ('select', 'picktext', 'rect', 'ellipse', 'arrow', 'line', 'pen',
+                   'text', 'number', 'highlight', 'blur', 'gaussian', 'magnify', 'crop')
+
+    def __init__(self, canvas, parent=None, compact=False):
         super().__init__(parent)
+        self.compact = bool(compact)
         self._closing = False
         self.canvas = canvas
         self._workers = []
@@ -2413,38 +2460,77 @@ class EditTools(QtWidgets.QFrame):
         self.setObjectName('editTools')
         self.setStyleSheet('#editTools{background:#24242c;border:1px solid #626273;border-radius:6px;}'
                            'QToolButton,QPushButton{color:#eeeeef;background:#30303a;padding:4px;}'
-                           'QToolButton:checked{background:#6656d9;} QLabel{color:#eeeeef;}')
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(6, 5, 6, 5)
+                           'QToolButton:checked{background:#6656d9;} QLabel{color:#eeeeef;}'
+                           'QMenu{color:#eeeeef;background:#24242c;border:1px solid #626273;}'
+                           'QMenu::item{padding:6px 22px;} QMenu::item:selected{background:#6656d9;}')
+        if self.compact:
+            self.setStyleSheet(self.styleSheet() +
+                '#editTools{background:#25272c;border:1px solid #484b53;border-radius:8px;}'
+                'QToolButton{background:transparent;border:0;border-radius:7px;padding:0px;color:#f1f3f5;}'
+                'QToolButton:hover{background:#3b424d;}'
+                'QToolButton:pressed,QToolButton:checked{background:#3c526c;}'
+                'QToolButton#captureCopy{background:#355f86;}'
+                'QToolButton#captureCopy:hover{background:#4275a2;}')
+        layout = QtWidgets.QHBoxLayout(self) if self.compact else QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6) if self.compact else layout.setContentsMargins(6, 5, 6, 5)
         layout.setSpacing(4)
-        row = QtWidgets.QHBoxLayout(); row.setSpacing(2); layout.addLayout(row)
+        row = layout if self.compact else QtWidgets.QHBoxLayout()
+        row.setSpacing(2)
+        if not self.compact:
+            layout.addLayout(row)
         self.buttons = {}
+        self.group_actions = {}
+        self._compact_groups = {}
+        self._setting_tool_actions = {}
+        self._menu_grabbers = {}
+        self.current_tool = None
         self.group = QtWidgets.QButtonGroup(self)
-        for name in ('select', 'picktext', 'rect', 'ellipse', 'arrow', 'pen',
-                     'text', 'number', 'highlight', 'blur', 'crop'):
-            button = QtWidgets.QToolButton()
-            button.setIcon(line_icon(name))
-            button.setIconSize(QtCore.QSize(20, 20))
-            button.setToolTip(t('a_' + name))
+        for name in self._tool_names:
+            button = QtWidgets.QToolButton(self)
+            icon_name = name
+            button.setIcon(self._icon(icon_name))
+            button.setIconSize(QtCore.QSize(26, 26) if self.compact else QtCore.QSize(20, 20))
+            button.setToolTip(t('a_gaussian_blur' if name == 'gaussian' else 'a_' + name))
             button.setCheckable(True)
-            button.setFixedSize(30, 30)
+            button.setFixedSize(40, 40) if self.compact else button.setFixedSize(30, 30)
             button.clicked.connect(lambda _, n=name: self.set_tool(n))
-            self.group.addButton(button); row.addWidget(button)
+            self.group.addButton(button)
             self.buttons[name] = button
-        self.color = QtWidgets.QToolButton(); self.color.setIcon(swatch_icon(canvas.color))
-        self.color.setToolTip(t('dlg_pickcolor')); self.color.clicked.connect(self.choose_color)
-        row.addWidget(self.color)
-        self.line_width = QtWidgets.QSpinBox(); self.line_width.setRange(1,30)
-        self.line_width.setValue(canvas.width); self.line_width.setFixedWidth(48)
-        self.line_width.valueChanged.connect(canvas.set_width); row.addWidget(self.line_width)
-        self.actions = QtWidgets.QHBoxLayout(); self.actions.setSpacing(4)
-        layout.addLayout(self.actions)
-        self.action_button('undo', t('a_undo'), canvas.undo)
-        self.action_button('redo', t('a_redo'), canvas.redo)
-        self.action_button('clear', t('a_clear'), canvas.clear_items)
-        self.note = QtWidgets.QLabel(t('edit_hint'))
-        self.note.setWordWrap(True); self.note.setMaximumWidth(460)
-        layout.addWidget(self.note)
+
+        self.color = QtWidgets.QToolButton(self)
+        self.color.setIcon(swatch_icon(canvas.color))
+        self.color.setToolTip(t('dlg_pickcolor'))
+        self.color.clicked.connect(self.choose_color)
+        self.line_width = QtWidgets.QSpinBox(self)
+        self.line_width.setRange(1, 30)
+        self.line_width.setValue(canvas.width)
+        self.line_width.setFixedWidth(54)
+        self.line_width.valueChanged.connect(canvas.set_width)
+
+        self.actions = row if self.compact else QtWidgets.QHBoxLayout()
+        self.actions.setSpacing(4)
+        if not self.compact:
+            layout.addLayout(self.actions)
+
+        if self.compact:
+            self.color.hide()
+            self._build_compact_tools(row)
+            self._build_settings_menu()
+        else:
+            for name in self._tool_names:
+                row.addWidget(self.buttons[name])
+            row.addWidget(self.color)
+            row.addWidget(self.line_width)
+            self.action_button('undo', t('a_undo'), canvas.undo)
+            self.action_button('redo', t('a_redo'), canvas.redo)
+            self.action_button('clear', t('a_clear'), canvas.clear_items)
+        if self.compact:
+            self.note = CompactStatusLabel(parent or self, self)
+        else:
+            self.note = QtWidgets.QLabel(t('edit_hint'))
+            self.note.setWordWrap(True)
+            self.note.setMaximumWidth(460)
+            layout.addWidget(self.note)
         canvas.picktextNeedsWords.connect(self.recognize)
         canvas.textSelected.connect(self.copy_words)
         canvas.cropRequested.connect(canvas.crop_image)
@@ -2456,23 +2542,238 @@ class EditTools(QtWidgets.QFrame):
             shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(key), parent or self)
             shortcut.activated.connect(action); self._shortcuts.append(shortcut)
 
+    def _new_tool_button(self, name, size=30, hidden=False):
+        button = self.buttons[name]
+        button.setFixedSize(size, size)
+        if hidden:
+            button.hide()
+        return button
+
+    def _make_tool_action(self, menu, name, group=None):
+        label = t('a_gaussian_blur' if name == 'gaussian' else 'a_' + name)
+        action = QtWidgets.QAction(self._icon(name),
+                                   label, menu)
+        action.setObjectName('tool:' + name)
+        action.setCheckable(True)
+        if group is not None:
+            group.addAction(action)
+        action.triggered.connect(lambda _checked=False, n=name: self.buttons[n].click())
+        return action
+
+    def _build_compact_tools(self, row):
+        select = self.buttons['select']
+        row.addWidget(select)
+
+        groups = [
+            ('shape', 'rect', ('rect', 'ellipse')),
+            ('stroke', 'pen', ('pen', 'highlight')),
+            ('line', 'arrow', ('arrow', 'line')),
+            ('text', 'text', ('text', 'number')),
+            ('magnify', 'magnify', ('magnify',)),
+            ('mosaic', 'blur', ('blur', 'gaussian')),
+        ]
+        for key, initial, names in groups:
+            button = QtWidgets.QToolButton(self)
+            button.setIcon(self._icon(initial))
+            button.setIconSize(QtCore.QSize(26, 26))
+            button.setText('⌄' if len(names)>1 else '')
+            button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+            button.setToolTip(t('a_' + initial))
+            button.setFixedSize(46 if len(names)>1 else 40,40)
+            button.setCheckable(True)
+            menu = QtWidgets.QMenu(self)
+            menu.setWindowFlags(menu.windowFlags() | Qt.Popup | Qt.FramelessWindowHint |
+                                Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
+            menu.setAttribute(Qt.WA_ShowWithoutActivating, False)
+            actions = {}
+            action_group = QtWidgets.QActionGroup(menu)
+            action_group.setExclusive(True)
+            for name in names:
+                action = self._make_tool_action(menu, name, action_group)
+                menu.addAction(action)
+                actions[name] = action
+            self.group_actions[key] = actions
+            self._compact_groups[key] = (button, menu, tuple(names))
+            menu.aboutToHide.connect(lambda m=menu: self._menu_hidden(m))
+            if len(names)>1:
+                button.clicked.connect(lambda _checked=False, b=button, m=menu:
+                                       self._popup_compact_menu(b, m))
+            else:
+                button.clicked.connect(lambda _checked=False,n=initial:self.set_tool(n))
+            row.addWidget(button)
+
+        self.undo_button = self.action_button('undo', t('a_undo') + ' · Ctrl+Z', self.canvas.undo)
+        settings_button = QtWidgets.QToolButton(self)
+        settings_button.setIcon(self._icon('settings'))
+        settings_button.setIconSize(QtCore.QSize(26, 26))
+        settings_button.setFixedSize(40, 40) if self.compact else button.setFixedSize(30, 30)
+        settings_button.setToolTip(t('t_settings'))
+        self.settings_menu = QtWidgets.QMenu(self)
+        self.settings_menu.setWindowFlags(
+            self.settings_menu.windowFlags() | Qt.Popup | Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
+        self.settings_menu.aboutToHide.connect(
+            lambda m=self.settings_menu: self._menu_hidden(m))
+        settings_button.clicked.connect(lambda _checked=False:
+                                        self._popup_compact_menu(settings_button, self.settings_menu))
+        self.settings_button = settings_button
+        row.addWidget(settings_button)
+        separator=QtWidgets.QFrame(self)
+        separator.setFixedSize(1,26)
+        separator.setStyleSheet('background:#535963;border:0;')
+        row.addWidget(separator)
+
+        # Keep legacy direct access such as tools.buttons['rect'].click() working;
+        # aliases drive the same canvas state but never overlap the compact row.
+        for name, tool_button in self.buttons.items():
+            if name != 'select':
+                tool_button.hide()
+
+    def _build_settings_menu(self):
+        menu = self.settings_menu
+        color_action = menu.addAction(swatch_icon(self.canvas.color), t('a_color'))
+        color_action.setObjectName('setting:color')
+        color_action.triggered.connect(self.choose_color)
+        width_action = QtWidgets.QWidgetAction(menu)
+        width_action.setObjectName('setting:width')
+        width_action.setText(t('lab_width'))
+        width_widget = QtWidgets.QWidget(menu)
+        width_layout = QtWidgets.QHBoxLayout(width_widget)
+        width_layout.setContentsMargins(12, 2, 12, 2)
+        width_label = QtWidgets.QLabel(t('lab_width'), width_widget)
+        width_layout.addWidget(width_label)
+        width_layout.addWidget(self.line_width)
+        width_action.setDefaultWidget(width_widget)
+        menu.addAction(width_action)
+        menu.addSeparator()
+        for name in ('picktext', 'crop'):
+            action = self._make_tool_action(menu, name)
+            action.setObjectName('tool:' + name)
+            self._setting_tool_actions[name] = action
+            menu.addAction(action)
+        menu.addSeparator()
+        for key, label, icon, callback in (
+                ('undo', t('a_undo'), 'undo', self.canvas.undo),
+                ('redo', t('a_redo'), 'redo', self.canvas.redo),
+                ('clear', t('a_clear'), 'clear', self.canvas.clear_items)):
+            action = menu.addAction(self._icon(icon), label)
+            action.setObjectName('setting:' + key)
+            action.triggered.connect(callback)
+
+    def _popup_compact_menu(self, button, menu):
+        old = self._menu_grabbers.get(menu)
+        if old is not None:
+            return
+        # Checkable tool buttons toggle before clicked() runs. Opening a menu
+        # must not create a second highlighted tool, especially when canceled.
+        self._sync_tool_buttons(self.current_tool)
+        grabber = QtWidgets.QWidget.keyboardGrabber()
+        if grabber is not None:
+            grabber.releaseKeyboard()
+        self._menu_grabbers[menu] = grabber
+        pos = button.mapToGlobal(QtCore.QPoint(0, button.height()))
+        menu.popup(pos)
+        if not menu.isVisible():
+            self._restore_menu_keyboard(menu)
+
+    def _restore_menu_keyboard(self, menu):
+        if menu not in self._menu_grabbers:
+            return
+        previous = self._menu_grabbers.pop(menu)
+        current = QtWidgets.QWidget.keyboardGrabber()
+        restore = current is None
+        if current is menu or (current is not None and menu.isAncestorOf(current)):
+            current.releaseKeyboard()
+            restore = True
+        if (previous is not None and previous.isVisible() and restore
+                and not isinstance(previous, QtWidgets.QMenu)
+                and not menu.isAncestorOf(previous)):
+            previous.grabKeyboard()
+
+    def _menu_hidden(self, menu):
+        self._restore_menu_keyboard(menu)
+        self._sync_tool_buttons(self.current_tool)
+
+    def add_setting_action(self, icon, label, action):
+        """Add a parent-provided command (such as opening the full editor)."""
+        if not self.compact:
+            raise RuntimeError('setting-menu actions are only available in compact mode')
+        item = self.settings_menu.addAction(self._icon(icon), label)
+        item.setObjectName('setting:external')
+        item.triggered.connect(action)
+        return item
+
+    def _icon(self, name):
+        return line_icon(name, color='#eef0f5' if self.compact else '#d2d2da',
+                         size=26 if self.compact else 22)
+
     def action_button(self, icon, label, action):
         button = QtWidgets.QToolButton()
-        button.setIcon(line_icon(icon)); button.setToolTip(label)
-        button.setFixedSize(30,30); button.clicked.connect(action)
+        button.setIcon(self._icon(icon)); button.setToolTip(label)
+        button.setFixedSize(40,40) if self.compact else button.setFixedSize(30,30)
+        button.setIconSize(QtCore.QSize(26,26) if self.compact else QtCore.QSize(20,20))
+        if self.compact and icon == 'copy':
+            button.setObjectName('captureCopy')
+        button.clicked.connect(action)
         self.actions.addWidget(button)
         return button
 
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if self.compact and hasattr(self, 'note'):
+            self.note.reposition()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.compact and hasattr(self, 'note'):
+            self.note.reposition()
+
     def set_tool(self, name):
-        self.canvas.set_tool(name)
-        self.buttons[name].setChecked(True)
+        if name not in self.buttons:
+            return
+        self.current_tool = name
+        if name == 'gaussian':
+            self.canvas.blur_style = 'gaussian'
+            self.canvas.set_tool('blur')
+        else:
+            if name == 'blur':
+                self.canvas.blur_style = 'pixelate'
+            self.canvas.set_tool(name)
+        self._sync_tool_buttons(name)
         if name == 'picktext' and not self.canvas._word_boxes:
             self.recognize()
 
+    def _sync_tool_buttons(self, name):
+        if name is None:
+            return
+        for tool_name, button in self.buttons.items():
+            button.setChecked(tool_name == name)
+        for key, (button, _menu, names) in self._compact_groups.items():
+            button.setChecked(name in names)
+            if name in names:
+                button.setIcon(self._icon(name))
+                button.setToolTip(t('a_gaussian_blur' if name == 'gaussian' else 'a_' + name))
+            for option, action in self.group_actions.get(key, {}).items():
+                action.setChecked(option == name)
+        for tool_name, action in self._setting_tool_actions.items():
+            action.setChecked(tool_name == name)
+
     def choose_color(self):
-        color = ungrabbed_dialog(QtWidgets.QColorDialog.getColor, self.canvas.color, self)
+        dialog=QtWidgets.QColorDialog(self.canvas.color,self)
+        dialog.setOption(QtWidgets.QColorDialog.DontUseNativeDialog,True)
+        if self.window().windowFlags() & Qt.X11BypassWindowManagerHint:
+            dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowStaysOnTopHint |
+                                  Qt.X11BypassWindowManagerHint)
+        accepted=ungrabbed_dialog(dialog.exec_)
+        color=dialog.selectedColor() if accepted else QtGui.QColor()
+        dialog.deleteLater()
         if color.isValid():
             self.canvas.set_color(color); self.color.setIcon(swatch_icon(color))
+            if self.compact:
+                for action in self.settings_menu.actions():
+                    if action.objectName() == 'setting:color':
+                        action.setIcon(swatch_icon(color))
+                        break
 
     def invalidate_words(self):
         self._generation += 1
@@ -2512,6 +2813,9 @@ class EditTools(QtWidgets.QFrame):
     def retire(self):
         self._closing = True
         self._generation += 1
+        if self.compact:
+            self.note.hide()
+            self.note.deleteLater()
         if self._workers:
             self._retired.add(self.window())
             for worker in self._workers:
@@ -2524,11 +2828,63 @@ class EditTools(QtWidgets.QFrame):
         self.note.setText(t('st_copied'))
 
 
+class CaptureResizeHandle(QtWidgets.QWidget):
+    """An edge hit area with one visible corner/midpoint grip."""
+    def __init__(self, edge, owner):
+        super().__init__(owner)
+        self.edge = edge
+        self.setMouseTracking(True)
+        self.setCursor({'n':Qt.SizeVerCursor,'s':Qt.SizeVerCursor,
+                        'w':Qt.SizeHorCursor,'e':Qt.SizeHorCursor,
+                        'nw':Qt.SizeFDiagCursor,'se':Qt.SizeFDiagCursor,
+                        'ne':Qt.SizeBDiagCursor,'sw':Qt.SizeBDiagCursor}[edge])
+
+    def paintEvent(self, event):
+        painter=QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setPen(QtGui.QPen(QtGui.QColor('white'),1))
+        painter.setBrush(QtGui.QColor('#249cff'))
+        painter.drawEllipse(self.rect().center(),3,3)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            owner=self.parent()
+            owner._begin_resize(self.edge)
+            owner._loupe_pos=owner.mapFromGlobal(event.globalPos())
+            owner.loupe.show();owner.loupe.raise_();owner.loupe.update()
+
+    def mouseMoveEvent(self, event):
+        owner=self.parent()
+        owner._loupe_pos=owner.mapFromGlobal(event.globalPos())
+        if event.buttons() & Qt.LeftButton:
+            owner._resize_selection(event.globalPos())
+        owner.loupe.update();owner.loupe.show();owner.loupe.raise_()
+
+    def mouseReleaseEvent(self, event):
+        self.parent()._end_resize()
+
+    def leaveEvent(self, event):
+        if self.parent()._resize_edge is None:
+            self.parent().loupe.hide()
+
+
+class CaptureLoupe(QtWidgets.QWidget):
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, event):
+        owner=self.parent()
+        painter=QtGui.QPainter(self)
+        owner._draw_loupe(painter,owner._loupe_pos)
+
+
 class InlineCaptureEditor(QtWidgets.QWidget):
     """Edit the selected image on the desktop before committing any output."""
     dismissed = pyqtSignal()
 
-    def __init__(self, image, region, on_finish, parent=None):
+    def __init__(self, image, region, on_finish, parent=None, background=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint |
                          Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -2537,21 +2893,39 @@ class InlineCaptureEditor(QtWidgets.QWidget):
         self._confirmed = False
         screen = QtWidgets.QApplication.screenAt(region.center()) if region else None
         screen = screen or QtWidgets.QApplication.primaryScreen()
-        bounds = screen.geometry()
+        self._background = background
+        self._resize_edge = None
+        self._loupe_pos = QtCore.QPoint()
+        self.handles = {}
+        bounds = background[1] if background is not None else screen.geometry()
+        if background is not None:
+            self.bg_img, _, self.dpr = background
+        self._region = QRect(region) if region is not None else None
         self.setGeometry(bounds)
         self.canvas = AnnotateCanvas()
         self.canvas.set_image_bgr(image)
         self.viewport = QtWidgets.QScrollArea(self)
         self.viewport.setWidget(self.canvas)
         self.viewport.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.viewport.setStyleSheet('QScrollArea{background:#202026;}')
-        self.tools = EditTools(self.canvas, self)
-        for icon,label,action in [('copy',t('card_copy'),'copy'),('save',t('card_save'),'save'),
-                                  ('pin',t('card_pin'),'pin'),('pen',t('open_editor'),'editor')]:
-            self.tools.action_button(icon,label,lambda _,a=action:self.finish(a))
-        self.tools.action_button('close',t('card_close'),self.close)
+        self.viewport.setStyleSheet('QScrollArea{background:#202026;border:0;border-radius:0;padding:0;}')
+        self.tools = EditTools(self.canvas, self, compact=True)
+        self.action_buttons = {}
+        for icon,label,action in [('scroll',t('cap_manual'),'scroll'),('record',t('cap_record'),'record'),
+                                  ('ocr',t('e_ocr'),'ocr'),('pin',t('card_pin'),'pin'),
+                                  ('save',t('card_save'),'save'),
+                                  ('editor',t('open_editor'),'editor'),
+                                  ('close',t('card_close'),'cancel'),
+                                  ('copy',t('card_copy'),'copy')]:
+            self.action_buttons[action] = self.tools.action_button(icon,label,
+                lambda _,a=action:self._action(a))
+        self.editor_button = self.action_buttons['editor']
+        self.tools.add_setting_action('editor',t('open_editor'),lambda:self.finish('editor'))
         self.tools.adjustSize()
-        self._region = region
+        self.loupe = CaptureLoupe(self)
+        self.loupe.setGeometry(self.rect())
+        if background is not None:
+            self.handles = {edge:CaptureResizeHandle(edge,self)
+                            for edge in ('nw','n','ne','e','se','s','sw','w')}
         self.canvas.changed.connect(self._fit_canvas)
         self._fit_canvas()
         for key, action in [('Escape',self.close),('Return',lambda:self.finish('copy')),
@@ -2571,30 +2945,117 @@ class InlineCaptureEditor(QtWidgets.QWidget):
         if grabber is self or (grabber is not None and self.isAncestorOf(grabber)):
             grabber.releaseKeyboard()
 
+    LOUPE = RegionSelector.LOUPE
+    ZOOM = RegionSelector.ZOOM
+    _loupe_geometry = RegionSelector._loupe_geometry
+    _draw_loupe = RegionSelector._draw_loupe
+    _pixel = RegionSelector._pixel
+
+    def _action(self, action):
+        if action == 'cancel':
+            self.close()
+        elif action == 'ocr':
+            self.canvas._finish_text()
+            self.tools.set_tool('picktext')
+        else:
+            self.finish(action)
+
+    def _can_resize(self):
+        return (self._background is not None and self._region is not None and
+                self.canvas.base is not None and
+                self.canvas.base.size() == QtCore.QSize(round(self._region.width()*self.dpr),
+                                                       round(self._region.height()*self.dpr)))
+
     def _fit_canvas(self):
         if self.canvas.base is None:
             return
         bounds=self.geometry()
         area=self._region or QRect(bounds.center()-QtCore.QPoint(320,200),QtCore.QSize(640,400))
         area=area.intersected(bounds).translated(-bounds.topLeft())
-        width=min(max(80,area.width()),max(80,self.width()-20))
-        height=min(max(60,area.height()),max(60,self.height()-self.tools.height()-24))
-        x=max(10,min(area.x(),self.width()-width-10))
-        y=max(10,min(area.y(),self.height()-height-10))
-        self.viewport.setGeometry(x,y,width,height)
-        self.canvas.fit_width(width)
-        # Reserve space for a scrollbar when a long image exceeds the viewport.
-        if self.canvas.height()>height:
-            self.canvas.fit_width(width-self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent))
-        tx=max(4,min(x+width-self.tools.width(),self.width()-self.tools.width()-4))
-        ty=y+height+6
-        if ty+self.tools.height()>self.height()-4:
-            ty=max(4,y-self.tools.height()-6)
+        if self._can_resize():
+            self.viewport.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.viewport.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.viewport.setGeometry(area)
+            self.canvas.scale=1.0/self.dpr
+            self.canvas._apply_size()
+        else:
+            self.viewport.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            self.viewport.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            width=min(max(80,area.width()),max(80,self.width()-20))
+            height=min(max(60,area.height()),max(60,self.height()-self.tools.height()-24))
+            x=max(10,min(area.x(),self.width()-width-10))
+            y=max(10,min(area.y(),self.height()-height-10))
+            self.viewport.setGeometry(x,y,width,height)
+            self.canvas.fit_width(width)
+            if self.canvas.height()>height:
+                self.canvas.fit_width(width-self.style().pixelMetric(QtWidgets.QStyle.PM_ScrollBarExtent))
+        area=self.viewport.geometry()
+        screen=QtWidgets.QApplication.screenAt(self.mapToGlobal(area.center()))
+        available=(screen.geometry().translated(-bounds.topLeft()).intersected(self.rect())
+                   if screen else self.rect())
+        tx=max(available.left()+4,min(area.right()+1-self.tools.width(),available.right()-self.tools.width()-3))
+        ty=area.bottom()+10
+        if ty+self.tools.height()>available.bottom()-3:
+            ty=max(available.top()+4,area.top()-self.tools.height()-10)
         self.tools.move(tx,ty); self.tools.raise_()
+        x,y,w,h=area.x(),area.y(),area.width(),area.height()
+        grips={'nw':QRect(x-5,y-5,10,10),'ne':QRect(x+w-5,y-5,10,10),
+               'sw':QRect(x-5,y+h-5,10,10),'se':QRect(x+w-5,y+h-5,10,10),
+               'n':QRect(x+5,y-5,max(1,w-10),10),'s':QRect(x+5,y+h-5,max(1,w-10),10),
+               'w':QRect(x-5,y+5,10,max(1,h-10)),'e':QRect(x+w-5,y+5,10,max(1,h-10))}
+        for edge,handle in self.handles.items():
+            handle.setGeometry(grips[edge]);handle.setVisible(self._can_resize());handle.raise_()
+        self.action_buttons['scroll'].setEnabled(self._can_resize())
+        self.action_buttons['record'].setEnabled(self._can_resize())
+        self.update()
+
+    def _begin_resize(self, edge):
+        self.canvas._finish_text()
+        self._resize_edge=edge
+        self._resize_start=QRect(self._region)
+        self._resize_document=self.canvas.snapshot_document()
+
+    def _resize_selection(self, global_pos):
+        if self._resize_edge is None:
+            return
+        r=QRect(self._resize_start)
+        bounds=self._background[1]
+        x=max(bounds.left(),min(global_pos.x(),bounds.right()))
+        y=max(bounds.top(),min(global_pos.y(),bounds.bottom()))
+        if 'w' in self._resize_edge: r.setLeft(min(x,r.right()-8))
+        if 'e' in self._resize_edge: r.setRight(max(x,r.left()+8))
+        if 'n' in self._resize_edge: r.setTop(min(y,r.bottom()-8))
+        if 's' in self._resize_edge: r.setBottom(max(y,r.top()+8))
+        self._region=r
+        local=r.translated(-bounds.topLeft())
+        base=self.bg_img.copy(round(local.x()*self.dpr),round(local.y()*self.dpr),
+                              round(local.width()*self.dpr),round(local.height()*self.dpr))
+        offset=QtCore.QPointF((self._resize_start.x()-r.x())*self.dpr,
+                             (self._resize_start.y()-r.y())*self.dpr)
+        def reframe(state):
+            result=self.canvas._copy_content_state(state)
+            result['base']=base
+            for item in result['items']:
+                self.canvas._translate_item(item,offset)
+            return result
+        state=reframe(self._resize_document)
+        state['undo']=[reframe(value) for value in self._resize_document['undo']]
+        state['redo']=[reframe(value) for value in self._resize_document['redo']]
+        self.canvas.restore_document(state)
+        self._loupe_pos=self.mapFromGlobal(global_pos)
+        self.loupe.update()
+
+    def _end_resize(self):
+        self._resize_edge=None
+        self.loupe.hide()
 
     def paintEvent(self, event):
         painter=QtGui.QPainter(self)
+        if self._background is not None:
+            painter.drawImage(self.rect(),self.bg_img)
         painter.fillRect(self.rect(),QtGui.QColor(0,0,0,110))
+        painter.setPen(QtGui.QPen(QtGui.QColor('#249cff'),2))
+        painter.drawRect(self.viewport.geometry().adjusted(-1,-1,1,1))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2605,11 +3066,13 @@ class InlineCaptureEditor(QtWidgets.QWidget):
             return
         # Release the X11 keyboard grab before any native save dialog is opened.
         self._release_keyboard()
+        if action == 'save':
+            self.hide()  # Native save dialogs belong to the window-manager layer.
         if self._on_finish(action,self.canvas):
             self._confirmed=True
             self.close()
-        elif self.isVisible():
-            self.grabKeyboard()
+        else:
+            self.show();self.raise_();self.activateWindow();self.grabKeyboard()
 
     def closeEvent(self, event):
         self._release_keyboard()
@@ -2852,13 +3315,16 @@ class PinnedImage(QtWidgets.QWidget):
     def set_editing(self, editing=True, tool='select'):
         self._editing = editing
         if editing and self.tools is None:
-            self.tools = EditTools(self.canvas, self)
-            self.tools.note.setText(t('pin_edit_hint'))
-            self.tools.action_button('copy',t('card_copy'),self._copy_image)
-            self.tools.action_button('save',t('card_save'),self._save_image)
+            self.tools = EditTools(self.canvas, self, compact=True)
+            self.tools.action_button('ocr', t('e_ocr'), lambda:self.tools.set_tool('picktext'))
+            self.tools.action_button('save', t('card_save'), self._save_image)
             if self._on_edit:
-                self.tools.action_button('pen',t('open_editor'),self._open_in_editor)
-            self.tools.action_button('close',t('finish_edit'),lambda:self.set_editing(False))
+                self.editor_button = self.tools.action_button(
+                    'editor', t('open_editor'), self._open_in_editor)
+                self.tools.add_setting_action('editor', t('open_editor'), self._open_in_editor)
+            self.tools.action_button(
+                'close', t('finish_edit'), lambda: self.set_editing(False))
+            self.tools.action_button('copy', t('card_copy'), self._copy_image)
             self.tools.adjustSize()
         self._lbl.setVisible(not editing)
         self.canvas.setVisible(editing)
@@ -2868,6 +3334,12 @@ class PinnedImage(QtWidgets.QWidget):
                 shortcut.setEnabled(editing)
             if editing:
                 self.tools.set_tool(tool)
+            else:
+                self.canvas._finish_text()
+                self.tools._generation += 1
+                for worker in self.tools._workers:
+                    worker.requestInterruption()
+                self.tools.note.setText('')
         self._apply()
 
     def _copy_image(self):
@@ -2898,6 +3370,15 @@ class PinnedImage(QtWidgets.QWidget):
                         self.canvas.height()+self.tools.height())
         else:
             self.resize(pix.size())
+        screen = QtGui.QGuiApplication.screenAt(self.frameGeometry().topLeft())
+        if screen is None:
+            screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            max_x = max(available.left(), available.right() - self.width() + 1)
+            max_y = max(available.top(), available.bottom() - self.height() + 1)
+            self.move(min(max(self.x(), available.left()), max_x),
+                      min(max(self.y(), available.top()), max_y))
 
     def wheelEvent(self, e):
         if e.modifiers() & Qt.ControlModifier:
@@ -2998,78 +3479,190 @@ def _make_hint(text):
 # Screen recording: ffmpeg x11grab
 # --------------------------------------------------------------------------- #
 class Recorder(QtCore.QObject):
-    """Record a screen region to mp4 using ffmpeg x11grab (optionally convert to gif)."""
-    def __init__(self, region, out_path, fps=15, parent=None):
+    """Nonblocking MP4 finalization and optional GIF export via QProcess."""
+    phase = pyqtSignal(str)
+    progress = pyqtSignal(int)
+    completed = pyqtSignal(str, str)  # saved paths, error (MP4 may succeed while GIF fails)
+
+    def __init__(self, region, out_path, fps=15, parent=None, export_gif=False):
         super().__init__(parent)
-        self.region = region                    # (x, y, w, h) physical pixels
-        self.out_path = out_path
-        self.fps = fps
-        self.proc = QtCore.QProcess()
+        self.region, self.out_path, self.fps = region, out_path, fps
+        self.export_gif = export_gif
+        self.proc = QtCore.QProcess(self)
+        self.converter = QtCore.QProcess(self)
+        self.stopping = False
+        self._done = False
+        self._duration = 0.0
+        self._buffers = {}
+        self._errors = {}
+        for process in (self.proc, self.converter):
+            process.readyReadStandardOutput.connect(lambda p=process:self._read_progress(p))
+            process.readyReadStandardError.connect(lambda p=process:self._read_error(p))
+            process.errorOccurred.connect(lambda error,p=process:self._process_error(p,error))
+        self.proc.finished.connect(self._record_finished)
+        self.converter.finished.connect(self._gif_finished)
+        self._stop_timer=QtCore.QTimer(self)
+        self._stop_timer.setSingleShot(True)
+        self._stop_timer.timeout.connect(self._stop_timeout)
+
+    def _record_args(self):
+        import os
+        x,y,w,h=self.region
+        w-=w%2;h-=h%2
+        return ['-y','-loglevel','error','-progress','pipe:1','-nostats',
+                '-f','x11grab','-probesize','32','-analyzeduration','0','-framerate',str(self.fps),'-video_size',f'{w}x{h}',
+                '-i',f"{os.environ.get('DISPLAY', ':0')}+{x},{y}",
+                '-codec:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',self.out_path]
 
     def start(self):
-        import os
-        x, y, w, h = self.region
-        w -= w % 2; h -= h % 2                   # h264 requires even side lengths
-        disp = os.environ.get("DISPLAY", ":0")
-        args = ["-y", "-f", "x11grab", "-framerate", str(self.fps),
-                "-video_size", f"{w}x{h}", "-i", f"{disp}+{x},{y}",
-                "-codec:v", "libx264", "-preset", "ultrafast",
-                "-pix_fmt", "yuv420p", self.out_path]
-        self.proc.start("ffmpeg", args)
+        self.proc.start('ffmpeg',self._record_args())
         return self.proc.waitForStarted(3000)
 
-    def stop(self):
-        if self.proc.state() != QtCore.QProcess.NotRunning:
-            self.proc.write(b"q")                # let ffmpeg finish gracefully
-            self.proc.closeWriteChannel()
-            if not self.proc.waitForFinished(6000):
-                self.proc.terminate()
-                self.proc.waitForFinished(2000)
+    def _read_error(self, process):
+        text=bytes(process.readAllStandardError()).decode(errors='replace')
+        self._errors[process]=(self._errors.get(process,'')+text)[-3000:]
 
-    def to_gif(self, gif_path):
-        """Convert the recorded mp4 to gif (two-pass palette method)."""
-        import os, subprocess, tempfile
-        pal = os.path.join(tempfile.gettempdir(), "ss_palette.png")
-        vf = f"fps={min(15, self.fps)},scale=640:-1:flags=lanczos"
-        subprocess.run(["ffmpeg", "-y", "-i", self.out_path, "-vf",
-                        vf + ",palettegen", pal], capture_output=True)
-        subprocess.run(["ffmpeg", "-y", "-i", self.out_path, "-i", pal,
-                        "-lavfi", vf + " [x]; [x][1:v] paletteuse",
-                        gif_path], capture_output=True)
-        return os.path.exists(gif_path)
+    def _read_progress(self, process):
+        data=self._buffers.get(process,'')+bytes(process.readAllStandardOutput()).decode(errors='replace')
+        lines=data.split('\n');self._buffers[process]=lines.pop()
+        for line in lines:
+            key,_,value=line.partition('=')
+            if key != 'out_time_us':
+                continue
+            try: seconds=max(0,int(value)/1000000)
+            except ValueError: continue
+            if process is self.proc:
+                self._duration=max(self._duration,seconds)
+            elif self._duration>0:
+                self.progress.emit(min(99,round(seconds/self._duration*100)))
+
+    def stop(self):
+        if self.stopping or self._done:
+            return
+        self.stopping=True
+        self.phase.emit('mp4');self.progress.emit(-1)
+        if self.proc.state()!=QtCore.QProcess.NotRunning:
+            self.proc.write(b'q');self.proc.closeWriteChannel()
+            self._stop_timer.start(8000)
+
+    def _stop_timeout(self):
+        if self.proc.state()!=QtCore.QProcess.NotRunning:
+            self._errors[self.proc]='ffmpeg did not finish saving within 8 seconds.'
+            self.proc.kill()
+
+    def _process_error(self, process, error):
+        if error==QtCore.QProcess.FailedToStart:
+            self._complete(self.out_path if process is self.converter else '',process.errorString())
+
+    @staticmethod
+    def _valid_file(path):
+        import os
+        return os.path.isfile(path) and os.path.getsize(path)>0
+
+    def _record_finished(self, code, status):
+        self._stop_timer.stop()
+        self._read_progress(self.proc);self._read_error(self.proc)
+        if self._done:
+            return
+        self.stopping=True
+        if code!=0 or status!=QtCore.QProcess.NormalExit or not self._valid_file(self.out_path):
+            self._complete('',self._errors.get(self.proc,'') or 'MP4 recording failed.')
+        elif self.export_gif:
+            self._start_gif()
+        else:
+            self._complete(self.out_path,'')
+
+    def _start_gif(self):
+        from pathlib import Path
+        self.gif_path=str(Path(self.out_path).with_suffix('.gif'))
+        self.phase.emit('gif');self.progress.emit(0 if self._duration>0 else -1)
+        filters=(f'fps={min(15,self.fps)},scale=640:-1:flags=lanczos,split[a][b];'
+                 '[a]palettegen[p];[b][p]paletteuse')
+        self.converter.start('ffmpeg',['-y','-loglevel','error','-progress','pipe:1','-nostats',
+            '-i',self.out_path,'-filter_complex_threads','1','-filter_complex',filters,self.gif_path])
+
+    def _gif_finished(self, code, status):
+        self._read_progress(self.converter);self._read_error(self.converter)
+        if code==0 and status==QtCore.QProcess.NormalExit and self._valid_file(self.gif_path):
+            self._complete(self.out_path+'\n'+self.gif_path,'')
+        else:
+            self._complete(self.out_path,self._errors.get(self.converter,'') or 'GIF export failed.')
+
+    def _complete(self, paths, error):
+        if self._done:
+            return
+        self._done=True
+        if not error:self.progress.emit(100)
+        self.completed.emit(paths,error)
 
 
 class RecordBar(QtWidgets.QWidget):
-    """Recording control bar: shows a timer and a stop button."""
-    def __init__(self, on_stop):
+    """Timer, explicit output format, and nonblocking save/export progress."""
+    stopRequested=pyqtSignal()
+    _place=ScrollHud._place
+    show_on_top=ScrollHud.show_on_top
+    paintEvent=ScrollHud.paintEvent
+
+    def __init__(self, on_stop, region=None, export_gif=False):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
-                            Qt.X11BypassWindowManagerHint)
-        self.setObjectName("RecordBar")
-        lay = QtWidgets.QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 12, 6)
-        self.lbl = QtWidgets.QLabel("● REC  00:00")
-        self.btn = QtWidgets.QPushButton("⏹ Stop")
-        self.btn.clicked.connect(on_stop)
-        lay.addWidget(self.lbl); lay.addWidget(self.btn)
-        self.setStyleSheet(
-            "#RecordBar{background:#2b2b2b;border:1px solid #c0392b;border-radius:8px;}"
-            "QLabel{color:#ff5b5b;font-weight:bold;font-size:14px;}"
-            "QPushButton{background:#c0392b;color:white;padding:5px 14px;"
-            "border-radius:4px;font-weight:bold;}")
-        self.adjustSize()
-        sg = QtWidgets.QApplication.primaryScreen().availableGeometry()
-        self.move(sg.center().x() - self.width() // 2, sg.bottom() - self.height() - 30)
-        self._secs = 0
-        self._t = QtCore.QTimer(self); self._t.setInterval(1000)
-        self._t.timeout.connect(self._tick); self._t.start()
+                            Qt.X11BypassWindowManagerHint | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setObjectName('RecordBar')
+        self._region=QRect(region) if region is not None else QRect()
+        self._format='MP4 + GIF' if export_gif else 'MP4'
+        self.stopRequested.connect(on_stop)
+        lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(12,8,12,8)
+        row=QtWidgets.QHBoxLayout()
+        self.lbl=QtWidgets.QLabel()
+        self.btn=QtWidgets.QPushButton('Stop' if _LANG=='en' else '停止')
+        self.btn.clicked.connect(self.stopRequested.emit)
+        row.addWidget(self.lbl);row.addWidget(self.btn);lay.addLayout(row)
+        self.progress_bar=QtWidgets.QProgressBar();self.progress_bar.hide()
+        lay.addWidget(self.progress_bar)
+        self.setStyleSheet('#RecordBar{background:#25272c;border:1px solid #e74c3c;border-radius:8px;}'
+            'QLabel{color:#f0f0f4;font-size:14px;} QPushButton{background:#c0392b;color:white;'
+            'padding:5px 14px;border:0;border-radius:4px;}'
+            'QProgressBar{color:white;border:1px solid #555;border-radius:3px;text-align:center;}'
+            'QProgressBar::chunk{background:#4385be;}')
+        self._secs=0;self._tick_label()
+        self.adjustSize();self._place()
+        self._t=QtCore.QTimer(self);self._t.setInterval(1000)
+        self._t.timeout.connect(self._tick);self._t.start()
+        self._esc=KeyListener(on_press=lambda key:self.stopRequested.emit() if key==Key.esc else None)
+        self._esc.start()
+        self.setToolTip('Esc: stop' if _LANG=='en' else 'Esc：停止录屏')
+
+    def _tick_label(self):
+        self.lbl.setText(f'● {self._format}  {self._secs//60:02d}:{self._secs%60:02d} · Esc')
 
     def _tick(self):
-        self._secs += 1
-        self.lbl.setText(f"● REC  {self._secs // 60:02d}:{self._secs % 60:02d}")
+        self._secs+=1;self._tick_label()
+
+    def set_phase(self, phase):
+        self.stop_timer();self.btn.setEnabled(False)
+        text=('Saving MP4…' if phase=='mp4' else 'Exporting GIF…') if _LANG=='en' else (
+              '正在保存 MP4…' if phase=='mp4' else '正在转换 GIF…')
+        self.lbl.setText(text);self.progress_bar.show();self.adjustSize()
+        if phase == 'mp4':
+            # ffmpeg may still be capturing its last frame: keep controls outside.
+            self.hide();self._place();self.show_on_top()
+        else:
+            screen=QtWidgets.QApplication.screenAt(self._region.center()) or QtWidgets.QApplication.primaryScreen()
+            self.move(screen.availableGeometry().center()-self.rect().center())
+            self.show();self.raise_()
+
+    def set_progress(self, value):
+        self.progress_bar.setRange(0,0 if value<0 else 100)
+        if value>=0:self.progress_bar.setValue(value)
 
     def stop_timer(self):
         self._t.stop()
+        if self._esc is not None:
+            self._esc.stop();self._esc=None
+
+    def closeEvent(self,event):
+        self.stop_timer();super().closeEvent(event)
 
 
 # --------------------------------------------------------------------------- #
@@ -3174,6 +3767,7 @@ class MainWindow(QtWidgets.QWidget):
         self._pending_history = {}
         QtWidgets.QApplication.instance().aboutToQuit.connect(self._history_writer.shutdown)
         self._inline_editor = None
+        self._capture_background = None
         self._capture_rect = None
         self._canvas_base_key = None
         QtWidgets.QApplication.clipboard().dataChanged.connect(self._on_clipboard_changed)
@@ -3196,11 +3790,12 @@ class MainWindow(QtWidgets.QWidget):
 
     def _tbtn(self, icon, tip, checkable=False):
         b = QtWidgets.QToolButton()
-        b.setIcon(line_icon(icon))
-        b.setIconSize(QtCore.QSize(22, 22))
+        b.setIcon(line_icon(icon,size=24))
+        b.setIconSize(QtCore.QSize(24, 24))
         b.setFixedSize(36, 36)
         b.setToolTip(tip)
         b.setCheckable(checkable)
+        b.setStyleSheet("QToolButton{padding:3px;}")
         b.setAutoRaise(True)
         b.setCursor(Qt.PointingHandCursor)
         return b
@@ -3361,25 +3956,27 @@ class MainWindow(QtWidgets.QWidget):
         self.scroll.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         layout.addWidget(self.scroll, 3)
 
-        # ---------- OCR text result ---------- #
-        self.text = QtWidgets.QPlainTextEdit()
-        layout.addWidget(self.text, 2)
-        # 全部识别 / 全部复制 float inside the OCR box bottom-left and appear only
-        # once the box holds recognized text (children of the viewport, repositioned
-        # on resize via the event filter below).
-        self._ocr_btns = QtWidgets.QWidget(self.text.viewport())
-        self._ocr_btns.setObjectName("ocrActions")
-        br = QtWidgets.QHBoxLayout(self._ocr_btns)
-        br.setContentsMargins(6, 4, 6, 4); br.setSpacing(6)
-        self.btn_ocr_all = QtWidgets.QPushButton()
-        self.btn_copy_all = QtWidgets.QPushButton()
-        for b in (self.btn_ocr_all, self.btn_copy_all):
-            b.setFixedHeight(28)
-            b.setCursor(Qt.PointingHandCursor)
-        br.addWidget(self.btn_ocr_all)
-        br.addWidget(self.btn_copy_all)
+        # ---------- OCR text result: fixed header above the scrolling text ---------- #
+        self._ocr_panel=QtWidgets.QFrame()
+        self._ocr_panel.setObjectName('ocrPanel')
+        ocr_layout=QtWidgets.QVBoxLayout(self._ocr_panel)
+        ocr_layout.setContentsMargins(1,1,1,1);ocr_layout.setSpacing(0)
+        self._ocr_btns=QtWidgets.QWidget(self._ocr_panel)
+        self._ocr_btns.setObjectName('ocrActions')
+        self._ocr_btns.setAttribute(Qt.WA_StyledBackground,True)
+        br=QtWidgets.QHBoxLayout(self._ocr_btns)
+        br.setContentsMargins(10,7,12,5);br.setSpacing(6)
         br.addStretch(1)
-        self.text.viewport().installEventFilter(self)
+        self.btn_ocr_all=QtWidgets.QPushButton()
+        self.btn_copy_all=QtWidgets.QPushButton()
+        for button in (self.btn_ocr_all,self.btn_copy_all):
+            button.setFixedHeight(28);button.setCursor(Qt.PointingHandCursor)
+            br.addWidget(button)
+        ocr_layout.addWidget(self._ocr_btns)
+        self.text=QtWidgets.QPlainTextEdit()
+        self.text.setObjectName('ocrText')
+        ocr_layout.addWidget(self.text,1)
+        layout.addWidget(self._ocr_panel,2)
 
         self.status = QtWidgets.QLabel()
         self.status.setObjectName("status")
@@ -3508,18 +4105,18 @@ class MainWindow(QtWidgets.QWidget):
                 (self.btn_record, "record"), (self.btn_colorpick, "color"),
                 (self.btn_repeat, "repeat"), (self.btn_history, "history"),
                 (self.btn_settings, "settings"), (self.btn_undo, "undo"),
-                (self.btn_clear, "clear"), (self.btn_ocr, "ocr"),
+                (self.btn_redo,"redo"), (self.btn_clear, "clear"), (self.btn_ocr, "ocr"),
                 (self.btn_copy, "copy"), (self.btn_pin, "pin"),
                 (self.btn_beautify, "beautify"), (self.btn_save, "save")):
             icon = line_icon(name, colors["on_accent"] if button is self.btn_single
-                             else colors["icon"])
+                             else colors["icon"],size=button.iconSize().width())
             if button.isCheckable():
-                icon.addPixmap(line_icon(name, colors["on_accent"]).pixmap(22, 22),
+                icon.addPixmap(line_icon(name, colors["on_accent"],size=button.iconSize().width()).pixmap(button.iconSize()),
                                QtGui.QIcon.Normal, QtGui.QIcon.On)
             button.setIcon(icon)
         for name, button in self._tool_btns.items():
-            icon = line_icon(name, colors["icon"])
-            icon.addPixmap(line_icon(name, colors["on_accent"]).pixmap(22, 22),
+            icon = line_icon(name, colors["icon"],size=button.iconSize().width())
+            icon.addPixmap(line_icon(name, colors["on_accent"],size=button.iconSize().width()).pixmap(button.iconSize()),
                            QtGui.QIcon.Normal, QtGui.QIcon.On)
             button.setIcon(icon)
 
@@ -3593,7 +4190,9 @@ class MainWindow(QtWidgets.QWidget):
             background:{editor}; border:1px solid {edge}; border-radius:10px;
             padding:8px; color:{fg}; selection-background-color:{a};
         }}
-        QWidget#ocrActions {{ background:{editor}; border:none; }}
+        QFrame#ocrPanel {{ background:{editor}; border:1px solid {edge}; border-radius:10px; }}
+        QPlainTextEdit#ocrText {{ border:none; }}
+        QWidget#ocrActions {{ background:{editor}; border:none; border-radius:9px; }}
         QWidget#ocrActions QPushButton {{
             border-radius:6px; padding:2px 10px; min-height:0;
         }}
@@ -3656,7 +4255,7 @@ class MainWindow(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, lambda: (self.raise_(), self.activateWindow()))
 
     def _unfinished_capture(self):
-        if self._inline_editor is not None and self._inline_editor.isVisible():
+        if self._inline_editor is not None:
             self._inline_editor.tools.note.setText(t('finish_capture_first'))
             return True
         return False
@@ -3692,6 +4291,7 @@ class MainWindow(QtWidgets.QWidget):
             return
         if self._unfinished_capture():
             return
+        self._capture_background = None
         self._capture_rect = None
         self._mode = mode
         self.showMinimized()
@@ -3710,6 +4310,9 @@ class MainWindow(QtWidgets.QWidget):
         self.activateWindow()
 
     def _on_region(self, gr: QRect, frozen=None):
+        selector=getattr(self,'selector',None)
+        self._capture_background = ((QtGui.QImage(selector.bg_img),QRect(selector.geometry()),selector.dpr)
+                                    if selector is not None and frozen is not None else None)
         self._capture_rect = QRect(gr)
         dpr = QtWidgets.QApplication.primaryScreen().devicePixelRatio()
         phys = (int(gr.left() * dpr), int(gr.top() * dpr),
@@ -3723,11 +4326,22 @@ class MainWindow(QtWidgets.QWidget):
         else:
             QtCore.QTimer.singleShot(150, lambda: self._scroll_shot(phys, dpr, gr))
 
+    def _freeze_region(self, phys):
+        screen=QtWidgets.QApplication.primaryScreen()
+        bounds=screen.virtualGeometry()
+        dpr=screen.devicePixelRatio()
+        bg=grab_region(round(bounds.x()*dpr),round(bounds.y()*dpr),
+                       round(bounds.width()*dpr),round(bounds.height()*dpr))
+        image=bgr_to_qimage(bg)
+        self._capture_background=(image,QRect(bounds),dpr)
+        x,y,w,h=phys
+        return qimage_to_bgr(image.copy(x-round(bounds.x()*dpr),y-round(bounds.y()*dpr),w,h))
+
     def _single_shot(self, phys, frozen=None):
         self._last_phys = phys              # remember it for "repeat last area"
         # Prefer the frozen-frame crop the user actually saw; only fall back to a live
         # re-grab (e.g. "repeat last area") where no overlay was on screen.
-        grab = (lambda: frozen) if frozen is not None else (lambda: grab_region(*phys))
+        grab = (lambda: frozen) if frozen is not None else (lambda: self._freeze_region(phys))
         self._grab_with_delay(
             lambda: self._present_capture(grab(), f"Region captured: {phys[2]}×{phys[3]} px"))
 
@@ -3845,7 +4459,7 @@ class MainWindow(QtWidgets.QWidget):
         self._capture_rect=QRect(int(x/dpr),int(y/dpr),int(w/dpr),int(h/dpr))
         self._grab_with_delay(
             lambda: self._present_capture(
-                grab_region(x, y, w, h), f"Window captured: {w}×{h} px"))
+                self._freeze_region((x,y,w,h)), f"Window captured: {w}×{h} px"))
 
     # --- repeat last area --- #
     def repeat_last(self):
@@ -3861,7 +4475,7 @@ class MainWindow(QtWidgets.QWidget):
         if getattr(self, "_thumb", None):
             self._thumb.close()
         QtCore.QTimer.singleShot(250, lambda: self._present_capture(
-            grab_region(*phys), f"Repeated last area: {phys[2]}×{phys[3]} px"))
+            self._freeze_region(phys), f"Repeated last area: {phys[2]}×{phys[3]} px"))
 
     # --- screen color picker --- #
     def pick_color_screen(self):
@@ -3895,6 +4509,7 @@ class MainWindow(QtWidgets.QWidget):
         self._start_scroll_worker(phys, gr or QRect(*phys), dpr, manual=False)
 
     def _start_scroll_worker(self, phys, gr, dpr, manual):
+        self._capture_background = None
         if self.worker is not None and self.worker.isRunning():
             return
         self.status.setText(t("hud_manual" if manual else "hud_auto") + " · Esc")
@@ -4011,7 +4626,10 @@ class MainWindow(QtWidgets.QWidget):
                 self._thumb.close()
             self.hide()
             self._inline_editor = InlineCaptureEditor(img,self._capture_rect,
-                lambda action,canvas:self._finish_inline(action,canvas,status),self)
+                lambda action,canvas:self._finish_inline(action,canvas,status),self,
+                background=self._capture_background)
+            output='MP4 + GIF' if self.settings.value('record_gif',False,type=bool) else 'MP4'
+            self._inline_editor.action_buttons['record'].setToolTip(t('cap_record')+' · '+output)
             self._inline_editor.dismissed.connect(self._inline_closed)
             return
         self._commit_capture(img,status)
@@ -4020,6 +4638,20 @@ class MainWindow(QtWidgets.QWidget):
         self._inline_editor = None
 
     def _finish_inline(self, action, canvas, status):
+        editor=self._inline_editor
+        if editor is not None and editor._region is not None:
+            self._capture_rect=QRect(editor._region)
+            dpr=(editor.dpr if editor._background is not None
+                 else QtWidgets.QApplication.primaryScreen().devicePixelRatio())
+            gr=QRect(editor._region)
+            phys=(round(gr.x()*dpr),round(gr.y()*dpr),round(gr.width()*dpr),round(gr.height()*dpr))
+            self._last_phys=phys
+            if action in ('scroll','record'):
+                if action == 'scroll':
+                    QtCore.QTimer.singleShot(180,lambda:self._manual_start(phys,gr))
+                else:
+                    QtCore.QTimer.singleShot(180,lambda:self._start_record(gr))
+                return True
         image=canvas.render_flattened()
         if action == 'save':
             path,_=QtWidgets.QFileDialog.getSaveFileName(self._inline_editor,t('dlg_save'),
@@ -4269,22 +4901,12 @@ class MainWindow(QtWidgets.QWidget):
     def eventFilter(self, obj, ev):
         if obj is self.text and ev.type() == QtCore.QEvent.Resize:
             self._place_toast()
-        elif obj is self.text.viewport() and ev.type() == QtCore.QEvent.Resize:
-            self._place_ocr_btns()
         return super().eventFilter(obj, ev)
-
-    def _place_ocr_btns(self):
-        """Pin the OCR button strip to the bottom-left inside the OCR box viewport."""
-        vp = self.text.viewport()
-        self._ocr_btns.adjustSize()
-        self._ocr_btns.move(6, max(0, vp.height() - self._ocr_btns.height() - 6))
 
     def _update_ocr_btns(self):
         """Show 全部识别/全部复制 only while the OCR box actually holds text."""
         has = bool(self.text.toPlainText().strip())
         self._ocr_btns.setVisible(has)
-        if has:
-            self._place_ocr_btns()
 
     def _do_crop(self, rectf):
         self.canvas.crop_image(rectf)
@@ -4442,7 +5064,9 @@ class MainWindow(QtWidgets.QWidget):
             self.worker.wait()
         self._close_scroll_hud()
         if self._recorder is not None:
+            self._quit_after_record=True
             self._on_record_stop()
+            return
         for worker in self._ocr_workers:
             worker.wait()
         QtWidgets.QApplication.quit()
@@ -4780,6 +5404,9 @@ class MainWindow(QtWidgets.QWidget):
 
     def _begin_record_select(self):
         self.selector = RegionSelector(mode="region")
+        output='MP4 + GIF' if self.settings.value('record_gif',False,type=bool) else 'MP4'
+        self.selector.hint_text=(f'Record {output}: select a region, Esc to cancel' if _LANG=='en'
+                                 else f'录屏 {output}：框选录制区域，Esc 取消')
         self.selector.selected.connect(self._start_record)
         self.selector.cancelled.connect(self._restore)
         self.selector.show()
@@ -4787,42 +5414,59 @@ class MainWindow(QtWidgets.QWidget):
 
     def _start_record(self, gr, frozen=None):
         import os
-        dpr = QtWidgets.QApplication.primaryScreen().devicePixelRatio()
-        phys = (int(gr.left() * dpr), int(gr.top() * dpr),
-                int(gr.width() * dpr), int(gr.height() * dpr))
-        d = self.settings.value("save_dir", os.path.expanduser("~/Videos"))
-        os.makedirs(d, exist_ok=True)
-        name = self._make_filename().replace(".png", ".mp4")
-        self._rec_out = os.path.join(d, name)
-        fps = self.settings.value("record_fps", 15, type=int)
-        self._recorder = Recorder(phys, self._rec_out, fps=fps)
-        if not self._recorder.start():
-            self._recorder = None
-            self._restore()
-            QtWidgets.QMessageBox.critical(self, "Recording failed", "Could not start ffmpeg")
+        from pathlib import Path
+        if self._recorder is not None:
             return
-        self._recbar = RecordBar(on_stop=self._on_record_stop)
-        self._recbar.show(); self._recbar.raise_()
+        dpr=QtWidgets.QApplication.primaryScreen().devicePixelRatio()
+        phys=(int(gr.x()*dpr),int(gr.y()*dpr),int(gr.width()*dpr),int(gr.height()*dpr))
+        phys=phys[:2]+(phys[2]-phys[2]%2,phys[3]-phys[3]%2)
+        gr=QRect(round(phys[0]/dpr),round(phys[1]/dpr),round(phys[2]/dpr),round(phys[3]/dpr))
+        directory=self.settings.value('save_dir',os.path.expanduser('~/Videos'))
+        try:os.makedirs(directory,exist_ok=True)
+        except OSError as error:
+            self._restore();self.status.setText(str(error));return
+        self._rec_out=str(Path(directory)/Path(self._make_filename()).with_suffix('.mp4'))
+        export_gif=self.settings.value('record_gif',False,type=bool)
+        rec=Recorder(phys,self._rec_out,fps=self.settings.value('record_fps',15,type=int),
+                     parent=self,export_gif=export_gif)
+        self._recorder=rec
+        self._record_border=ScrollRegionOverlay(gr)
+        self._recbar=RecordBar(self._on_record_stop,gr,export_gif)
+        rec.phase.connect(self._record_phase)
+        rec.progress.connect(self._recbar.set_progress)
+        rec.completed.connect(self._record_completed)
+        self._recbar.show_on_top()
+        self.status.setText(('Recording: ' if _LANG=='en' else '录屏中：')+('MP4 + GIF' if export_gif else 'MP4'))
+        rec.start()
+
+    def _record_phase(self, phase):
+        if getattr(self,'_record_border',None):
+            self._record_border.close();self._record_border.deleteLater();self._record_border=None
+        if getattr(self,'_recbar',None):
+            self._recbar.set_phase(phase)
 
     def _on_record_stop(self):
-        if self._recorder is None:
-            return
-        if getattr(self, "_recbar", None):
-            self._recbar.stop_timer(); self._recbar.close()
-        rec = self._recorder
-        self._recorder = None
-        rec.stop()
-        out = self._rec_out
-        msg = ("Recording saved: " if _LANG == "en" else "录屏已保存:") + out
-        if self.settings.value("record_gif", False, type=bool):
-            gif = out[:-4] + ".gif"
-            if rec.to_gif(gif):
-                msg += f"  GIF:{gif}"
+        if self._recorder is not None:
+            self._recorder.stop()
+
+    def _record_completed(self, paths, error):
+        rec=self._recorder
+        self._recorder=None
+        if getattr(self,'_record_border',None):
+            self._record_border.close();self._record_border.deleteLater();self._record_border=None
+        if getattr(self,'_recbar',None):
+            self._recbar.close();self._recbar.deleteLater();self._recbar=None
+        if rec is not None:rec.deleteLater()
+        msg=(('Saved: ' if _LANG=='en' else '已保存：')+paths) if paths else ''
+        if error:
+            msg+=('\n' if msg else '')+('Recording/export failed: ' if _LANG=='en' else '录制或导出失败：')+error
         self.status.setText(msg)
-        if hasattr(self, "tray"):
-            self.tray.showMessage(t("app_name") + " — " + ("Recording saved" if _LANG == "en" else "录屏完成"), out,
-                                  QtWidgets.QSystemTrayIcon.Information, 4000)
-        self._restore()
+        self.tray.showMessage(t('app_name'),msg,QtWidgets.QSystemTrayIcon.Warning if error
+                              else QtWidgets.QSystemTrayIcon.Information,6000)
+        if getattr(self,'_quit_after_record',False):
+            self.quit_app()
+        else:
+            self._restore()
 
 
 SERVER_NAME = "scrollshot-single-instance"

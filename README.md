@@ -36,12 +36,12 @@ Capture, extract text, and keep visual references at hand on Linux X11.
 
 | Tool | What it does |
 | --- | --- |
-| Capture | Annotate, extract text, copy, or save immediately after selection; open the full editor when needed. |
-| Scrolling capture | Automatic up/down or manual scrolling, with live preview and duplicate-aware stitching. |
+| Capture | Resize the blue selection with eight handles and a pixel loupe; use grouped tools in a single-row toolbar. |
+| Scrolling capture | Start manual scrolling in the red frame from the toolbar; automatic up/down modes, live preview, and duplicate-aware stitching. |
 | OCR | Chinese and English recognition, automatic OCR after capture, editor text selection, and screen text grab. |
-| Pin images | Keep images on top, zoom, adjust opacity, annotate, and drag across recognized words to copy. |
-| Edit and export | Undo/redo, move/delete annotations, change color/width, double-click to edit text, crop, and beautify. |
-| Record | Capture the screen as MP4 or GIF; adjust frame rate. |
+| Pin images | Keep images on top, zoom, adjust opacity, annotate with the grouped toolbar, and drag across recognized words to copy. |
+| Edit and export | Undo/redo, move/delete annotations, change color/width, type directly on the canvas and double-click to edit text, crop, and beautify. |
+| Record | Red recording frame, MP4 with optional additional GIF, save/export progress, and Esc to stop. |
 | Desktop | GNOME and KDE Plasma 5 shortcuts, themes, system tray, and background launch. |
 
 The app has English and Simplified Chinese interfaces. OCR uses Tesseract; screen recording uses ffmpeg.

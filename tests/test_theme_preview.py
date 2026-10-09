@@ -43,12 +43,11 @@ class ThemePreviewTest(unittest.TestCase):
 
     def test_ocr_actions_background_matches_editor_across_themes(self):
         self.window.text.setPlainText('OCR result')
-        for theme in ('dark', 'light', 'starship'):
+        for theme in ('dark', 'light', 'starship', 'vitesse_dark'):
             self.window._apply_style(theme=theme)
             self.app.processEvents()
-            image = self.window.text.viewport().grab().toImage()
-            pos = self.window._ocr_btns.pos()
-            self.assertEqual(image.pixelColor(pos.x() + 2, pos.y() + 10).name(),
+            image = self.window._ocr_btns.grab().toImage()
+            self.assertEqual(image.pixelColor(2, 10).name(),
                              kapture.THEMES[theme]['editor'], theme)
 
     def test_pin_shortcut_labels_describe_their_actual_actions(self):

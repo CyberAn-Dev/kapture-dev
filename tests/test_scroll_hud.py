@@ -50,17 +50,25 @@ class OcrButtonVisibilityTest(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(self.window._ocr_btns.isVisibleTo(self.window))
 
-    def test_buttons_are_children_of_the_text_viewport(self):
-        self.assertIs(self.window._ocr_btns.parent(), self.window.text.viewport())
+    def test_buttons_are_outside_the_scrolling_text_viewport(self):
+        self.assertIsNot(self.window._ocr_btns.parent(), self.window.text.viewport())
 
-    def test_buttons_reposition_inside_viewport(self):
-        self.window.text.setPlainText("x")
+    def test_buttons_stay_top_right_when_scrolling_and_avoid_scrollbar(self):
+        self.window.text.setPlainText('\n'.join('OCR line '+str(i) for i in range(180)))
         self.app.processEvents()
-        vp = self.window.text.viewport()
-        pos = self.window._ocr_btns.pos()
-        self.assertGreaterEqual(pos.x(), 0)
-        self.assertLessEqual(pos.y() + self.window._ocr_btns.height(),
-                             vp.height() + 1)
+        button=self.window.btn_copy_all
+        initial=button.mapToGlobal(QtCore.QPoint())
+        bar=self.window.text.verticalScrollBar()
+        self.assertGreater(bar.maximum(),0)
+        bar.setValue(bar.maximum());self.app.processEvents()
+        self.assertEqual(button.mapToGlobal(QtCore.QPoint()),initial)
+        text_top=self.window.text.mapToGlobal(QtCore.QPoint()).y()
+        self.assertLessEqual(initial.y()+button.height(),text_top)
+        bar_rect=QtCore.QRect(bar.mapToGlobal(QtCore.QPoint()),bar.size())
+        button_rect=QtCore.QRect(initial,button.size())
+        self.assertFalse(button_rect.intersects(bar_rect))
+        panel=self.window._ocr_panel
+        self.assertLessEqual(panel.mapToGlobal(QtCore.QPoint(panel.width(),0)).x()-button_rect.right(),20)
 
 
 class ScrollHudTest(unittest.TestCase):

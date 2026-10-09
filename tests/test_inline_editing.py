@@ -214,4 +214,39 @@ class InlineEditingTest(unittest.TestCase):
         self.assertEqual(schedule.call_count,0)
         self.assertIs(self.w._inline_editor,edit)
 
+    def test_inline_long_capture_uses_adjusted_region_without_committing_image(self):
+        edit=self.open_capture()
+        edit._region=QtCore.QRect(30,40,180,100)
+        pending=[]
+        with mock.patch.object(QtCore.QTimer,'singleShot',side_effect=lambda delay,fn:pending.append(fn)):
+            edit.finish('scroll')
+        self.assertIsNone(self.w._inline_editor)
+        self.assertEqual(self.w.history,[])
+        with mock.patch.object(self.w,'_manual_start') as start:
+            pending[-1]()
+        self.assertEqual(start.call_args.args[1],QtCore.QRect(30,40,180,100))
+
+    def test_inline_record_uses_selection_without_second_selector(self):
+        edit=self.open_capture()
+        edit._region=QtCore.QRect(30,40,180,100)
+        pending=[]
+        with mock.patch.object(QtCore.QTimer,'singleShot',side_effect=lambda delay,fn:pending.append(fn)):
+            edit.finish('record')
+        self.assertIsNone(self.w._inline_editor)
+        self.assertEqual(self.w.history,[])
+        with mock.patch.object(self.w,'_start_record') as start:
+            pending[-1]()
+        start.assert_called_once_with(QtCore.QRect(30,40,180,100))
+
+    def test_save_dialog_releases_overlay_and_cancel_restores_selection(self):
+        edit=self.open_capture()
+        def cancel(*args):
+            self.assertFalse(edit.isVisible())
+            self.assertTrue(self.w._unfinished_capture())
+            return ('','')
+        with mock.patch.object(QtWidgets.QFileDialog,'getSaveFileName',side_effect=cancel):
+            edit.finish('save')
+        self.assertTrue(edit.isVisible())
+        self.assertIs(self.w._inline_editor,edit)
+
 if __name__=='__main__': unittest.main()

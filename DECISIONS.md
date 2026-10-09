@@ -26,7 +26,7 @@
 
 ## Editor controls and automatic OCR
 
-- OCR action buttons remain in the viewport. Their named container uses the current editor background, while button colors inherit the shared theme; use scoped compact sizing rather than a local hard-coded translucent stylesheet.
+- OCR actions use a fixed header above the text viewport, aligned right inside the OCR module. Header and buttons inherit the editor palette; the text and scrollbars occupy their own lower area.
 
 - Place output actions immediately after their label, keeping the row left aligned.
 - Route Ctrl+Z to annotation undo when the editor controls have focus and to QPlainTextEdit undo when the OCR result box has focus.
@@ -53,9 +53,9 @@
 
 - 截屏取词 is a capture mode (`--mode textgrab`), not an editor tool: region → grab → background OCR → trimmed text to clipboard only; the editor never opens, no image is copied, no thumbnail. Reuses the frozen frame, delay countdown and `_last_phys` (repeat) like normal region capture.
 - Its OCR runs on a dedicated `OCRWorker` (`automatic=True` for the 20 s bound) instead of `run_ocr()`, so the editor's `_ocr_serial`/pending/toast state stays untouched; feedback is a standalone `_flash_note` (a `_make_hint`-style bypass-WM toast) because the editor's `_toast` lives inside the OCR text box and would be invisible. Not in `SHORTCUT_ACTIONS` for now — toolbar-only.
-- The OCR box bottom-left holds 全部识别 (re-runs `run_ocr(copy_result=False)`) and 全部复制 (copies the text box, empty box keeps the clipboard). Implemented by wrapping `self.text` in a container widget with a button row rather than overlaying buttons.
+- 全部识别 re-runs `run_ocr(copy_result=False)`; 全部复制 copies the text box, leaving the clipboard untouched if empty. Keep these actions in the OCR module.
 - picktext keeps the I-beam cursor only while the pointer is over a recognized word box (checked in `mouseMoveEvent` via `_word_at`); the default cursor is the arrow, and word-box-free images never show an I-beam. Rationale: a permanent I-beam suggested selectable text everywhere there is none.
-- 全部识别/全部复制 are children of `QPlainTextEdit.viewport()` (a container-widget row below the box was the first cut and rejected), positioned in the viewport's bottom-left and shown only while `textChanged` reports non-empty content — one signal covers OCR results, picktext copies, crops and manual edits.
+- The OCR header is a sibling of QPlainTextEdit, never a viewport child, so scrolling cannot move its buttons. Preserve visibility only for non-empty text. Apply Vitesse Dark through the user theme setting, without hard-coding a separate OCR palette.
 - Scrolling-capture feedback is a shared `ScrollHud` (live thumbnail + height + stop, placed outside the region) plus a red region frame. Both modes use it; `ManualBar` is deleted. Auto mode streams previews through a new `CaptureWorker.frame` signal, downscaled to 1200 px before emitting (queued-signal cost stays bounded for 40 000 px captures); the HUD's stop calls `worker.abort()`, reusing the worker's existing partial-result emit path instead of a new one.
 - The region frame is four thin always-on-top strips hugging the region's outer edge, NOT a full-desktop translucent overlay: `WA_TransparentForMouseEvents` is Qt-application-local and does not make an X11 top-level window click-through, so a full-desktop overlay swallowed pynput's wheel events and the auto scrolling capture could no longer scroll (self-inflicted regression, fixed by construction — the strips never cover the region and are mouse-transparent).
 - Automatic and manual scrolling share `CaptureWorker` and global-canvas matching. Manual grabbing, matching, stitching, and preview downsampling run off the GUI thread. Both directions extend only outside the existing canvas; automatic capture defaults downward and exposes upward capture in its toolbar dropdown.
@@ -116,3 +116,17 @@
 - User scope: target Xorg/X11 only; Wayland is not a planned requirement. Run the existing changes through the desktop user service without resetting settings/history, and deliver after the user-authorized text-entry correction.
 
 - Text input uses a native QLineEdit child of the shared canvas, preserving IME and text shortcuts. Commit each editing session as one annotation undo step; exports and document handoffs finish pending text. This replaces modal text dialogs on all editing surfaces.
+
+## Adjustable capture selection and compact toolbar (2026-10-09)
+
+- Preserve the whole frozen desktop through capture-time editing; reframe from that same image when handles move, never from a live grab containing the editor. Resize all annotation history coordinates with the selection so undo/redo does not revert selection dimensions or shift objects. Mixed-DPI support remains unverified; Xorg/X11 is the target.
+- Reuse RegionSelector's pixel loupe, AnnotateCanvas tools, existing red ScrollRegionOverlay and recording pipeline. Long-capture action starts manual scrolling directly from the adjusted region; automatic directions remain available from the main capture controls. Actual long-image output keeps the scrollable preview instead of editable desktop bounds.
+- Only capture-time controls use the compact grouped row; retain full editor and pin editing workflows. Group pixel mosaic and Gaussian blur while keeping the original pixel mosaic default. Move color/width/history controls and full-editor access into the settings menu; status text floats without widening the toolbar. X11 dropdown/color controls must remain above the bypass overlay and release/restore keyboard ownership. Hide the capture overlay while a native save dialog is open; restore it on cancellation/failure.
+
+- Capture toolbar readability: use 40px buttons, 26px monochrome icons generated at the application device-pixel ratio, flat hover/selection states, and a divider before capture/output actions. Expose Undo directly; retain Redo and secondary controls in settings. Keep the requested feature scope.
+
+- Share original, locally drawn rounded monoline icons across capture and pin editing. Use matching optical bounds and stroke weights, with vector text/OCR symbols instead of locale-dependent font glyphs. Pin editing reuses the compact toolbar rather than maintaining a second layout.
+
+- Full-editor access is a first-class toolbar action on capture and pins, with the settings-menu entry retained. Check states are derived from the current tool, never from dropdown open/close state. Main-window icons render at their displayed size and use the same theme-aware line artwork.
+- Recording always writes MP4; the existing `record_gif` preference adds a GIF rather than replacing MP4. Reuse the external red frame and placement logic so border/control pixels stay outside the recording. A global Esc stops recording even when a full-screen selection leaves no room for the bar.
+- QProcess finalization and GIF conversion stay on the event loop without blocking waits after Stop. MP4 finalization uses an indeterminate activity bar; GIF progress uses ffmpeg output timestamps and reaches 100 only on successful process/file validation. Failed GIF export reports the error while retaining the completed MP4. Normal application Quit defers until recording/export completes. X11 input probing is bounded to permit short clips.
