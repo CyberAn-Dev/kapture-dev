@@ -135,4 +135,4 @@
 
 - Main-editor annotation categories use dropdowns like capture-time editing; maintain exactly one active tool and update menu labels/icons when language/theme changes. Place labeled Output in the same row, retaining OCR/copy/pin/save/beautify commands. Save keeps original annotated dimensions; Beautify is a presentation export with decorative framing.
 
-- Main editor annotation controls use 36px icon buttons, fixed horizontal sizing for separators/width control and a trailing layout stretch; unused width stays after actions rather than spreading the icons across the editor.
+- Main editor annotation controls use 36px plain icon buttons and 40px split-menu buttons with zero generic padding and a 10px arrow area; the output menu indicator is centered at the right. Use fixed horizontal sizing for separators/width control and a trailing layout stretch; unused width stays after actions rather than spreading the icons across the editor.

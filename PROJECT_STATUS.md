@@ -14,7 +14,7 @@
 
 ## Completed
 
-- Main-editor icons use a consistent 36px grid with spare width kept after the output button, preserving compact left alignment on wide windows.
+- Main-editor plain icon buttons are 36px wide; dropdown buttons reserve a separate 10px arrow area within a 40px button without the generic padding. The output dropdown arrow is vertically centered. Spare width stays after the output button, preserving compact left alignment on wide windows.
 
 - Screenshot history now retains the latest 10 images, including pruning older oversized on-disk collections on load. The history dialog uses a balanced two-column thumbnail grid, concise localized titles, image dimensions and local timestamps; clicking a card resumes editing. New captures retain their timestamp across restarts; old captures display file save time with an explanatory tooltip.
 

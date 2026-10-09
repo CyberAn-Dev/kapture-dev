@@ -3891,6 +3891,8 @@ class MainWindow(QtWidgets.QWidget):
         self._scroll_up_action = self._scroll_menu.addAction("", lambda: self._start_auto_scroll(-1))
         self.btn_scroll.setMenu(self._scroll_menu)
         self.btn_scroll.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+        self.btn_scroll.setProperty("editorDropdown", True)
+        self.btn_scroll.setFixedWidth(40)
         self.btn_manual = self._tbtn("manual", "")
         self.btn_record = self._tbtn("record", "")
         top.addWidget(self._toolbar_group((self.btn_single, self.btn_textgrab,
@@ -3956,8 +3958,8 @@ class MainWindow(QtWidgets.QWidget):
             button.setObjectName("toolGroup_" + key)
             button.setIcon(line_icon(initial, size=22))
             button.setIconSize(QtCore.QSize(22, 22))
-            # Keep the main editor on one 36px icon grid.
-            button.setFixedSize(36, 36)
+            button.setProperty("editorDropdown", True)
+            button.setFixedSize(40, 36)
             button.setCheckable(True)
             button.setAutoRaise(True)
             button.setCursor(Qt.PointingHandCursor)
@@ -4052,7 +4054,8 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_ocr = QtWidgets.QToolButton()
         self.btn_ocr.setIcon(line_icon("ocr")); self.btn_ocr.setIconSize(QtCore.QSize(22, 22))
         self.btn_ocr.setObjectName("mainOcrButton")
-        self.btn_ocr.setFixedSize(36, 36)
+        self.btn_ocr.setProperty("editorDropdown", True)
+        self.btn_ocr.setFixedSize(40, 36)
         self.btn_ocr.setAutoRaise(True); self.btn_ocr.setCursor(Qt.PointingHandCursor)
         self.btn_ocr.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         ocr_menu = QtWidgets.QMenu(self.btn_ocr)
@@ -4364,6 +4367,15 @@ class MainWindow(QtWidgets.QWidget):
         QToolButton::menu-button {{ border:none; width:12px; border-top-right-radius:9px;
             border-bottom-right-radius:9px; }}
 
+
+        QToolButton[editorDropdown="true"] {{ padding:0px; }}
+        QToolButton[editorDropdown="true"]::menu-button {{ width:10px; }}
+
+        QToolButton#outputMenuButton {{ padding:0px 14px 0px 6px; }}
+        QToolButton#outputMenuButton::menu-indicator {{
+            subcontrol-origin:padding; subcontrol-position:center right;
+            right:4px; width:6px; height:6px;
+        }}
 
         /* normal buttons (dialogs etc.) */
         QPushButton {{

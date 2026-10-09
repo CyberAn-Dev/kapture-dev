@@ -89,7 +89,8 @@ class MainGroupedToolsTest(unittest.TestCase):
         icons = [widget for widget in self.window._annotation_widgets
                  if widget.objectName() in icon_names]
         self.assertTrue(icons)
-        self.assertTrue(all(widget.width() == 36 for widget in icons))
+        for widget in icons:
+            self.assertEqual(widget.width(), 40 if widget.property("editorDropdown") else 36)
         self.assertGreater(row.itemAt(17).geometry().width(), 0)
 
     def test_tool_menus_choose_one_canvas_tool_and_keep_group_highlights_exclusive(self):
