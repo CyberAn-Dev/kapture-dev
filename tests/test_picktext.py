@@ -73,6 +73,24 @@ class PickTextTest(unittest.TestCase):
         self.assertEqual(self.app.clipboard().text(), "hello world")
         self.assertEqual(self.window.text.toPlainText(), "hello world")
 
+    def test_chinese_word_selection_does_not_insert_character_spaces(self):
+        image = np.full((100, 180, 3), 255, dtype=np.uint8)
+        self.window.canvas.set_image_bgr(image)
+        self.window.canvas.set_word_boxes([
+            (QtCore.QRectF(10, 10, 20, 14), "数据"),
+            (QtCore.QRectF(32, 10, 20, 14), "质量")])
+        self._drag(QtCore.QPoint(20, 15), QtCore.QPoint(40, 15))
+        self.assertEqual(self.app.clipboard().text(), "数据质量")
+
+    def test_selection_across_lines_preserves_newline(self):
+        image = np.full((100, 180, 3), 255, dtype=np.uint8)
+        self.window.canvas.set_image_bgr(image)
+        self.window.canvas.set_word_boxes([
+            (QtCore.QRectF(10, 10, 60, 14), "第一行"),
+            (QtCore.QRectF(10, 30, 60, 14), "第二行")])
+        self._drag(QtCore.QPoint(20, 15), QtCore.QPoint(20, 35))
+        self.assertEqual(self.app.clipboard().text(), "第一行\n第二行")
+
     def test_single_word_click_copies_it(self):
         img = np.full((200, 400, 3), 255, dtype=np.uint8)
         self.window.canvas.set_image_bgr(img)

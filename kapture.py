@@ -252,8 +252,8 @@ TR = {
     "set_sc_invalid": {"zh": "此快捷键组合无法注册为全局快捷键。", "en": "This key combination cannot be registered globally."},
     "set_ocr_deflang": {"zh": "默认识别语言", "en": "Default OCR language"},
     "set_ocr_deflayout": {"zh": "默认版面", "en": "Default layout"},
-    "set_ocr_enh": {"zh": "图像增强(放大+二值化,提升准确率)",
-                    "en": "Image enhance (upscale + threshold, better accuracy)"},
+    "set_ocr_enh": {"zh": "图像增强（放大并保留字体细节）",
+                    "en": "Image enhance (upscale, preserve text detail)"},
     "set_autoocr": {"zh": "截图后自动 OCR（打开编辑器并显示结果）",
                     "en": "Run OCR after capture (open editor and show text)"},
     "set_ocr_note": {"zh": "提示:中文需已安装对应 tesseract 语言包",
@@ -896,7 +896,7 @@ def _strip_cjk_spaces(text):
     import re
     cjk = r"一-鿿　-〿＀-￯"
     # Whitespace between two CJK characters -> remove it (loop to handle adjacent cases)
-    pat = re.compile(rf"([{cjk}])\s+(?=[{cjk}])")
+    pat = re.compile(rf"([{cjk}])[ \t\u3000]+(?=[{cjk}])")
     prev = None
     while prev != text:
         prev = text
@@ -905,22 +905,18 @@ def _strip_cjk_spaces(text):
 
 
 def preprocess_for_ocr(bgr, upscale=2.0):
-    """Preprocess for OCR: upscale + grayscale + Otsu threshold (dark backgrounds auto-inverted to black text on white).
+    """Upscale soft screenshot strokes; let Tesseract perform binarisation.
 
-    Screenshot text is often small, anti-aliased or on a colored background; this pipeline usually
-    noticeably improves Tesseract's accuracy. Returns a single-channel (grayscale) image.
+    Forced thresholding and denoising can erase details in antialiased Chinese
+    glyphs. Keep grayscale edges and invert predominantly dark backgrounds.
     """
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     if upscale and upscale != 1.0:
         gray = cv2.resize(gray, None, fx=upscale, fy=upscale,
-                          interpolation=cv2.INTER_CUBIC)
-    # Light denoise, then Otsu thresholding
-    gray = cv2.bilateralFilter(gray, 5, 40, 40)
-    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # If it's a dark background (white text on black), invert to black text on white -- Tesseract prefers the latter
-    if th.mean() < 127:
-        th = cv2.bitwise_not(th)
-    return th
+                          interpolation=cv2.INTER_LINEAR)
+    if np.median(gray) < 127:
+        gray = cv2.bitwise_not(gray)
+    return gray
 
 
 def find_new_content(prev_bgr, cur_bgr, min_confidence=0.5):
@@ -2341,11 +2337,19 @@ class AnnotateCanvas(QtWidgets.QWidget):
 
     def mouseReleaseEvent(self, e):
         if self.tool == "picktext":
-            words = [w for _r, w in self._selected_words()]
+            words = self._selected_words()
             self._sel_from = self._sel_to = None
             self.update()
             if words:
-                self.textSelected.emit(" ".join(words))
+                parts = []
+                previous = None
+                for rect, word in words:
+                    if previous is not None:
+                        overlap = min(previous.bottom(), rect.bottom()) - max(previous.top(), rect.top())
+                        parts.append("\n" if overlap <= 0 else " ")
+                    parts.append(word)
+                    previous = rect
+                self.textSelected.emit(_strip_cjk_spaces("".join(parts)))
             return
         if self.tool == "select":
             if self._drag_moved and self._drag_before is not None:
@@ -4062,7 +4066,7 @@ class OCRWorker(QThread):
         import pytesseract
         try:
             data = pytesseract.image_to_data(pil, lang=self.lang,
-                                             config=f"--psm {self.psm}", timeout=20,
+                                             config=f"--oem 1 --psm {self.psm} --dpi 300", timeout=20,
                                              output_type=pytesseract.Output.DICT)
         except Exception:
             return []
@@ -4092,7 +4096,7 @@ class OCRWorker(QThread):
             else:
                 pil = Image.fromarray(cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB))
                 upscale = 1.0
-            config = f"--oem 1 --psm {self.psm} -c preserve_interword_spaces=1 --dpi 150"
+            config = f"--oem 1 --psm {self.psm} --dpi 300"
             txt = pytesseract.image_to_string(
                 pil, lang=self.lang, config=config, timeout=20)
         except pytesseract.TesseractNotFoundError:
