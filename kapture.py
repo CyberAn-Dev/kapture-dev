@@ -115,7 +115,7 @@ class NativeTextTranslator(QtCore.QTranslator):
         'Undo':'撤销','Redo':'重做','Cut':'剪切','Copy':'复制','Paste':'粘贴',
         'Delete':'删除','Select All':'全选','Select all':'全选',
         'Clear':'清空','Step up':'增加','Step down':'减少',
-        'OK':'确定','Cancel':'取消','Close':'关闭','Save':'保存','Open':'打开',
+        'OK':'确定','Cancel':'取消','Close':'关闭','Save':'保存','Open':'打开','Discard':'放弃',
         'Select Color':'选择颜色','Basic colors':'基本颜色','Custom colors':'自定义颜色',
         'Add to Custom Colors':'添加到自定义颜色','Pick Screen Color':'选取屏幕颜色',
         'Hue:':'色相：','Sat:':'饱和度：','Val:':'明度：','Red:':'红：','Green:':'绿：',
@@ -3099,8 +3099,8 @@ class InlineCaptureEditor(QtWidgets.QWidget):
             return
         # Release the X11 keyboard grab before any native save dialog is opened.
         self._release_keyboard()
-        if action == 'save':
-            self.hide()  # Native save dialogs belong to the window-manager layer.
+        if action in ('save', 'record'):
+            self.hide()  # Native dialogs belong to the window-manager layer.
         if self._on_finish(action,self.canvas):
             self._confirmed=True
             self.close()
@@ -3511,41 +3511,273 @@ def _make_hint(text):
 # --------------------------------------------------------------------------- #
 # Screen recording: ffmpeg x11grab
 # --------------------------------------------------------------------------- #
+class RecordingOptions(QtWidgets.QWidget):
+    """Shared defaults and per-capture options; resolution always preserves aspect ratio."""
+    def __init__(self, settings, size=None, parent=None):
+        super().__init__(parent)
+        self.size = size
+        form = QtWidgets.QFormLayout(self)
+        self._form = form
+        self.fps = QtWidgets.QSpinBox(); self.fps.setRange(1, 60)
+        self.fps.setValue(settings.value('record_fps', 15, type=int))
+        self.fps.setSuffix(' fps')
+        self.resolution = QtWidgets.QComboBox()
+        for zh, en, value in [('原始大小', 'Original', 'original'),
+                              ('适配 1920 × 1080', 'Fit 1920 × 1080', '1080'),
+                              ('适配 1280 × 720', 'Fit 1280 × 720', '720'),
+                              ('50%', '50%', 'half'), ('25%', '25%', 'quarter'),
+                              ('自定义宽度', 'Custom width', 'custom')]:
+            self.resolution.addItem(zh if _LANG == 'zh' else en, value)
+        self.resolution.setCurrentIndex(max(0, self.resolution.findData(
+            settings.value('record_resolution', 'original'))))
+        self.width = QtWidgets.QSpinBox(); self.width.setRange(2, 7680); self.width.setSingleStep(2)
+        self.width.setValue(settings.value('record_width', 1280, type=int)); self.width.setSuffix(' px')
+        self.countdown = QtWidgets.QSpinBox(); self.countdown.setRange(0, 30)
+        self.countdown.setValue(settings.value('record_countdown', 3, type=int))
+        self.duration = QtWidgets.QSpinBox(); self.duration.setRange(0, 3600)
+        self.duration.setValue(settings.value('record_duration', 0, type=int))
+        self.duration.setSpecialValueText('手动停止' if _LANG == 'zh' else 'Manual stop')
+        for spin in (self.countdown, self.duration):
+            spin.setSuffix(' 秒' if _LANG == 'zh' else ' s')
+        self.preview = QtWidgets.QLabel()
+        for zh, en, widget in [('帧率', 'Frame rate', self.fps), ('分辨率', 'Resolution', self.resolution),
+                              ('输出宽度', 'Output width', self.width), ('开始倒计时', 'Countdown', self.countdown),
+                              ('录制时长', 'Duration', self.duration)]:
+            form.addRow(zh if _LANG == 'zh' else en, widget)
+        form.addRow(self.preview)
+        self.resolution.currentIndexChanged.connect(self._update_preview)
+        self.width.valueChanged.connect(self._update_preview)
+        self._update_preview()
+
+    def output_size(self):
+        if self.size is None:
+            return None
+        w, h = self.size
+        mode = self.resolution.currentData()
+        scale = {'half': .5, 'quarter': .25}.get(mode, 1.)
+        if mode in ('1080', '720'):
+            mw, mh = (1920, 1080) if mode == '1080' else (1280, 720)
+            scale = min(1., mw / w, mh / h)
+        elif mode == 'custom':
+            scale = self.width.value() / w
+        return max(2, int(w * scale) // 2 * 2), max(2, int(h * scale) // 2 * 2)
+
+    def _update_preview(self):
+        custom = self.resolution.currentData() == 'custom'
+        self.width.setVisible(custom)
+        self._form.labelForField(self.width).setVisible(custom)
+        size = self.output_size()
+        self.preview.setText((('输出：' if _LANG == 'zh' else 'Output: ') + f'{size[0]} × {size[1]}')
+                             if size else ('分辨率保持区域比例' if _LANG == 'zh' else 'Aspect ratio is preserved'))
+
+    def values(self):
+        return dict(fps=self.fps.value(), output_size=self.output_size(),
+                    duration=self.duration.value(), countdown=self.countdown.value())
+
+    def save(self, settings):
+        for key, value in [('fps', self.fps.value()), ('resolution', self.resolution.currentData()),
+                           ('width', self.width.value()), ('duration', self.duration.value()),
+                           ('countdown', self.countdown.value())]:
+            settings.setValue('record_' + key, value)
+
+
+class RecordSetupDialog(QtWidgets.QDialog):
+    def __init__(self, settings, size, parent=None):
+        super().__init__(parent)
+        if parent is not None:
+            self.setStyleSheet(parent.styleSheet())
+        self.setWindowTitle('录屏设置' if _LANG == 'zh' else 'Recording setup')
+        self.setMinimumWidth(360)
+        layout = QtWidgets.QVBoxLayout(self)
+        self.options = RecordingOptions(settings, size, self)
+        layout.addWidget(self.options)
+        note = QtWidgets.QLabel('结束后选择 MP4、GIF 或 MKV 格式' if _LANG == 'zh'
+                                else 'Choose MP4, GIF or MKV after recording')
+        layout.addWidget(note)
+        buttons = QtWidgets.QDialogButtonBox()
+        buttons.addButton('开始录制' if _LANG == 'zh' else 'Start recording', QtWidgets.QDialogButtonBox.AcceptRole)
+        buttons.addButton('取消' if _LANG == 'zh' else 'Cancel', QtWidgets.QDialogButtonBox.RejectRole)
+        buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+class RecordingExporter(QtCore.QObject):
+    progress = pyqtSignal(int)
+    completed = pyqtSignal(str, str)
+
+    def __init__(self, source, fps, duration, parent=None):
+        super().__init__(parent)
+        self.source, self.fps, self.duration = source, fps, duration
+        self.proc = QtCore.QProcess(self)
+        self.proc.readyReadStandardOutput.connect(self._read_progress)
+        self.proc.readyReadStandardError.connect(self._read_error)
+        self.proc.finished.connect(self._finished)
+        self.proc.errorOccurred.connect(self._process_error)
+        self._buffer = ''; self._error = ''; self._done = True
+
+    def start(self, path, format_name):
+        from pathlib import Path
+        import uuid
+        self.path, self.format_name = path, format_name
+        target = Path(path)
+        self.staging = str(target.with_name('.' + target.stem + '-' + uuid.uuid4().hex + target.suffix))
+        self._buffer = ''; self._error = ''; self._done = False
+        args = ['-y', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', '-i', self.source]
+        if format_name == 'gif':
+            filters = f'fps={self.fps},split[a][b];[a]palettegen[p];[b][p]paletteuse'
+            args += ['-filter_complex_threads', '1', '-filter_complex', filters, '-loop', '0', '-f', 'gif']
+        else:
+            args += ['-map', '0:v:0', '-c:v', 'copy']
+            if format_name == 'mp4':
+                args += ['-movflags', '+faststart']
+            args += ['-f', 'mp4' if format_name == 'mp4' else 'matroska']
+        self.progress.emit(0 if self.duration > 0 else -1)
+        self.proc.start('ffmpeg', args + [self.staging])
+
+    def _read_progress(self):
+        self._buffer += bytes(self.proc.readAllStandardOutput()).decode(errors='replace')
+        lines = self._buffer.split('\n'); self._buffer = lines.pop()
+        for line in lines:
+            key, _, value = line.partition('=')
+            if key == 'out_time_us' and self.duration > 0:
+                try: self.progress.emit(min(99, max(0, round(int(value) / 1000000 / self.duration * 100))))
+                except ValueError: pass
+
+    def _read_error(self):
+        self._error = (self._error + bytes(self.proc.readAllStandardError()).decode(errors='replace'))[-3000:]
+
+    def _process_error(self, error):
+        if error == QtCore.QProcess.FailedToStart:
+            self._finish(self.proc.errorString())
+
+    def _finished(self, code, status):
+        import os
+        self._read_progress(); self._read_error()
+        error = self._error if code != 0 or status != QtCore.QProcess.NormalExit else ''
+        if code != 0 or status != QtCore.QProcess.NormalExit or not Recorder._valid_file(self.staging):
+            self._finish(error or ('导出失败' if _LANG == 'zh' else 'Export failed'))
+            return
+        try: os.replace(self.staging, self.path)
+        except OSError as exc: self._finish(str(exc)); return
+        self._finish('')
+
+    def _finish(self, error):
+        from pathlib import Path
+        if self._done: return
+        self._done = True
+        if error:
+            try: Path(self.staging).unlink(missing_ok=True)
+            except OSError: pass
+        else:
+            self.progress.emit(100)
+        self.completed.emit('' if error else self.path, error)
+
+
+class RecordExportDialog(QtWidgets.QDialog):
+    def __init__(self, source, fps, duration, directory, filename, parent=None):
+        super().__init__(parent)
+        if parent is not None:
+            self.setStyleSheet(parent.styleSheet())
+        self.setWindowTitle('导出录屏' if _LANG == 'zh' else 'Export recording')
+        self.setMinimumWidth(420)
+        self.directory, self.filename = directory, filename
+        self.saved_paths = []
+        self.busy = False
+        layout = QtWidgets.QVBoxLayout(self)
+        self.format = QtWidgets.QComboBox()
+        for label, value in [('MP4 · 视频', 'mp4'), ('GIF · 动图', 'gif'), ('MKV · 视频', 'mkv')]:
+            self.format.addItem(label if _LANG == 'zh' else value.upper(), value)
+        layout.addWidget(QtWidgets.QLabel('选择格式，可分别导出多个版本' if _LANG == 'zh'
+                                         else 'Choose a format; export multiple versions if needed'))
+        layout.addWidget(self.format)
+        self.progress = QtWidgets.QProgressBar(); self.progress.hide(); layout.addWidget(self.progress)
+        self.message = QtWidgets.QLabel(); self.message.setWordWrap(True); layout.addWidget(self.message)
+        row = QtWidgets.QHBoxLayout()
+        self.save_button = QtWidgets.QPushButton('导出…' if _LANG == 'zh' else 'Export…')
+        self.close_button = QtWidgets.QPushButton('放弃录屏' if _LANG == 'zh' else 'Discard recording')
+        row.addWidget(self.save_button); row.addStretch(); row.addWidget(self.close_button); layout.addLayout(row)
+        self.exporter = RecordingExporter(source, fps, duration, self)
+        self.exporter.progress.connect(self._progress)
+        self.exporter.completed.connect(self._completed)
+        self.save_button.clicked.connect(self._save)
+        self.close_button.clicked.connect(self.reject)
+
+    def _save(self):
+        from pathlib import Path
+        extension = self.format.currentData()
+        suggested = str(Path(self.directory) / Path(self.filename).with_suffix('.' + extension))
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, self.windowTitle(), suggested,
+                                                       f'{extension.upper()} (*.{extension})')
+        if not path: return
+        if not Path(path).suffix: path += '.' + extension
+        self.busy = True; self.save_button.setEnabled(False); self.close_button.setEnabled(False)
+        self.format.setEnabled(False); self.progress.show()
+        self.message.setText('正在导出…' if _LANG == 'zh' else 'Exporting…')
+        self.exporter.start(path, extension)
+
+    def _progress(self, value):
+        self.progress.setRange(0, 0 if value < 0 else 100)
+        if value >= 0: self.progress.setValue(value)
+
+    def _completed(self, path, error):
+        self.busy = False; self.save_button.setEnabled(True); self.close_button.setEnabled(True)
+        self.format.setEnabled(True)
+        if error:
+            self.message.setText(('导出失败，可重试：' if _LANG == 'zh' else 'Export failed; retry: ') + error)
+        else:
+            self.saved_paths.append(path)
+            self.message.setText(('已保存：' if _LANG == 'zh' else 'Saved: ') + path)
+            self.close_button.setText('完成' if _LANG == 'zh' else 'Done')
+
+    def reject(self):
+        if self.busy: return
+        if not self.saved_paths:
+            answer = QtWidgets.QMessageBox.question(self, self.windowTitle(),
+                '尚未导出，放弃这段录屏？' if _LANG == 'zh' else 'Discard this recording without exporting?',
+                QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel, QtWidgets.QMessageBox.Cancel)
+            if answer != QtWidgets.QMessageBox.Discard: return
+        super().reject()
+
+
 class Recorder(QtCore.QObject):
-    """Nonblocking MP4 finalization and optional GIF export via QProcess."""
+    """Capture an Xorg region to a temporary MP4 without blocking the UI."""
     phase = pyqtSignal(str)
     progress = pyqtSignal(int)
-    completed = pyqtSignal(str, str)  # saved paths, error (MP4 may succeed while GIF fails)
+    completed = pyqtSignal(str, str)  # temporary recording path, error
 
-    def __init__(self, region, out_path, fps=15, parent=None, export_gif=False):
+    def __init__(self, region, out_path, fps=15, parent=None, output_size=None, duration=0):
         super().__init__(parent)
         self.region, self.out_path, self.fps = region, out_path, fps
-        self.export_gif = export_gif
+        self.output_size, self.duration = output_size, duration
         self.proc = QtCore.QProcess(self)
-        self.converter = QtCore.QProcess(self)
         self.stopping = False
         self._done = False
         self._duration = 0.0
         self._buffers = {}
         self._errors = {}
-        for process in (self.proc, self.converter):
+        for process in (self.proc,):
             process.readyReadStandardOutput.connect(lambda p=process:self._read_progress(p))
             process.readyReadStandardError.connect(lambda p=process:self._read_error(p))
             process.errorOccurred.connect(lambda error,p=process:self._process_error(p,error))
         self.proc.finished.connect(self._record_finished)
-        self.converter.finished.connect(self._gif_finished)
+
         self._stop_timer=QtCore.QTimer(self)
         self._stop_timer.setSingleShot(True)
         self._stop_timer.timeout.connect(self._stop_timeout)
 
     def _record_args(self):
         import os
-        x,y,w,h=self.region
-        w-=w%2;h-=h%2
-        return ['-y','-loglevel','error','-progress','pipe:1','-nostats',
-                '-f','x11grab','-probesize','32','-analyzeduration','0','-framerate',str(self.fps),'-video_size',f'{w}x{h}',
-                '-i',f"{os.environ.get('DISPLAY', ':0')}+{x},{y}",
-                '-codec:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p',self.out_path]
+        x, y, w, h = self.region
+        w -= w % 2; h -= h % 2
+        args = ['-y', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats',
+                '-f', 'x11grab', '-probesize', '32', '-analyzeduration', '0',
+                '-framerate', str(self.fps), '-video_size', f'{w}x{h}',
+                '-i', f"{os.environ.get('DISPLAY', ':0')}+{x},{y}"]
+        if self.output_size and tuple(self.output_size) != (w, h):
+            args += ['-vf', f'scale={self.output_size[0]}:{self.output_size[1]}:flags=lanczos']
+        if self.duration:
+            args += ['-t', str(self.duration)]
+        return args + ['-codec:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', self.out_path]
 
     def start(self):
         self.proc.start('ffmpeg',self._record_args())
@@ -3566,8 +3798,7 @@ class Recorder(QtCore.QObject):
             except ValueError: continue
             if process is self.proc:
                 self._duration=max(self._duration,seconds)
-            elif self._duration>0:
-                self.progress.emit(min(99,round(seconds/self._duration*100)))
+
 
     def stop(self):
         if self.stopping or self._done:
@@ -3585,7 +3816,7 @@ class Recorder(QtCore.QObject):
 
     def _process_error(self, process, error):
         if error==QtCore.QProcess.FailedToStart:
-            self._complete(self.out_path if process is self.converter else '',process.errorString())
+            self._complete('',process.errorString())
 
     @staticmethod
     def _valid_file(path):
@@ -3600,26 +3831,8 @@ class Recorder(QtCore.QObject):
         self.stopping=True
         if code!=0 or status!=QtCore.QProcess.NormalExit or not self._valid_file(self.out_path):
             self._complete('',self._errors.get(self.proc,'') or 'MP4 recording failed.')
-        elif self.export_gif:
-            self._start_gif()
         else:
             self._complete(self.out_path,'')
-
-    def _start_gif(self):
-        from pathlib import Path
-        self.gif_path=str(Path(self.out_path).with_suffix('.gif'))
-        self.phase.emit('gif');self.progress.emit(0 if self._duration>0 else -1)
-        filters=(f'fps={min(15,self.fps)},scale=640:-1:flags=lanczos,split[a][b];'
-                 '[a]palettegen[p];[b][p]paletteuse')
-        self.converter.start('ffmpeg',['-y','-loglevel','error','-progress','pipe:1','-nostats',
-            '-i',self.out_path,'-filter_complex_threads','1','-filter_complex',filters,self.gif_path])
-
-    def _gif_finished(self, code, status):
-        self._read_progress(self.converter);self._read_error(self.converter)
-        if code==0 and status==QtCore.QProcess.NormalExit and self._valid_file(self.gif_path):
-            self._complete(self.out_path+'\n'+self.gif_path,'')
-        else:
-            self._complete(self.out_path,self._errors.get(self.converter,'') or 'GIF export failed.')
 
     def _complete(self, paths, error):
         if self._done:
@@ -3636,14 +3849,15 @@ class RecordBar(QtWidgets.QWidget):
     show_on_top=ScrollHud.show_on_top
     paintEvent=ScrollHud.paintEvent
 
-    def __init__(self, on_stop, region=None, export_gif=False):
+    def __init__(self, on_stop, region=None, fps=15, output_size=None, duration=0):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
                             Qt.X11BypassWindowManagerHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setObjectName('RecordBar')
         self._region=QRect(region) if region is not None else QRect()
-        self._format='MP4 + GIF' if export_gif else 'MP4'
+        self._format = f'{fps} fps' + (f' · {output_size[0]} × {output_size[1]}' if output_size else '')
+        self._limit = duration
         self.stopRequested.connect(on_stop)
         lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(12,8,12,8)
         row=QtWidgets.QHBoxLayout()
@@ -3667,15 +3881,28 @@ class RecordBar(QtWidgets.QWidget):
         self.setToolTip('Esc: stop' if _LANG=='en' else 'Esc：停止录屏')
 
     def _tick_label(self):
-        self.lbl.setText(f'● {self._format}  {self._secs//60:02d}:{self._secs%60:02d} · Esc')
+        limit = f' / {self._limit}s' if self._limit else ''
+        self.lbl.setText(f'● {self._format}  {self._secs//60:02d}:{self._secs%60:02d}{limit} · Esc')
 
     def _tick(self):
         self._secs+=1;self._tick_label()
 
+    def set_countdown(self, seconds):
+        self.btn.setText('取消' if _LANG == 'zh' else 'Cancel')
+        self.lbl.setText(f'{seconds} 秒后开始录屏' if _LANG == 'zh' else f'Recording starts in {seconds}s')
+        self.adjustSize(); self._place()
+
+    def start_timer(self):
+        self.btn.setText('停止' if _LANG == 'zh' else 'Stop')
+        self._secs = 0; self._tick_label(); self._t.start()
+        if self._esc is None:
+            self._esc = KeyListener(on_press=lambda key:self.stopRequested.emit() if key==Key.esc else None)
+            self._esc.start()
+        self.adjustSize(); self._place()
+
     def set_phase(self, phase):
         self.stop_timer();self.btn.setEnabled(False)
-        text=('Saving MP4…' if phase=='mp4' else 'Exporting GIF…') if _LANG=='en' else (
-              '正在保存 MP4…' if phase=='mp4' else '正在转换 GIF…')
+        text = 'Finishing recording…' if _LANG == 'en' else '正在完成录屏…'
         self.lbl.setText(text);self.progress_bar.show();self.adjustSize()
         if phase == 'mp4':
             # ffmpeg may still be capturing its last frame: keep controls outside.
@@ -3882,6 +4109,11 @@ class MainWindow(QtWidgets.QWidget):
         top = QtWidgets.QHBoxLayout(); top.setSpacing(8)
         self.btn_single = self._tbtn("region", "")
         self.btn_single.setObjectName("primaryCapture")
+        self.btn_single.setProperty("editorDropdown", True)
+        self.btn_single.setFixedWidth(40)
+        self._capture_menu = QtWidgets.QMenu(self.btn_single)
+        self.btn_single.setMenu(self._capture_menu)
+        self.btn_single.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         self.btn_textgrab = self._tbtn("textgrab", "")
         self.btn_window = self._tbtn("window", "")
         self.btn_scroll = self._tbtn("scroll", "")
@@ -3903,13 +4135,33 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_repeat = self._tbtn("repeat", "")
         self._lab_delay = QtWidgets.QLabel(); self._lab_delay.setObjectName("dim")
         self.delay = QtWidgets.QSpinBox(); self.delay.setRange(0, 10)
+        self.delay.setObjectName("captureDelay")
         self.delay.setFixedWidth(50)
         self._lab_speed = QtWidgets.QLabel(); self._lab_speed.setObjectName("dim")
         self.speed = QtWidgets.QSpinBox(); self.speed.setRange(1, 10)
+        self.speed.setObjectName("scrollSpeed")
         self.speed.setValue(3); self.speed.setFixedWidth(50)
-        top.addWidget(self._toolbar_group((self.btn_colorpick, self.btn_repeat,
-                                           self._vsep(), self._lab_delay, self.delay,
-                                           self._lab_speed, self.speed)))
+        capture_options = QtWidgets.QWidget()
+        capture_form = QtWidgets.QFormLayout(capture_options)
+        capture_form.addRow(self._lab_delay, self.delay)
+        self._capture_options_widget = capture_options
+        self._capture_settings_action = QtWidgets.QWidgetAction(self._capture_menu)
+        self._capture_settings_action.setObjectName("captureSettings")
+        self._capture_settings_action.setDefaultWidget(capture_options)
+        self._capture_menu.addAction(self._capture_settings_action)
+
+        scroll_options = QtWidgets.QWidget()
+        scroll_form = QtWidgets.QFormLayout(scroll_options)
+        scroll_form.addRow(self._lab_speed, self.speed)
+        self._scroll_options_widget = scroll_options
+        self._scroll_settings_action = QtWidgets.QWidgetAction(self._scroll_menu)
+        self._scroll_settings_action.setObjectName("scrollSettings")
+        self._scroll_settings_action.setDefaultWidget(scroll_options)
+        self._scroll_menu.insertAction(self._scroll_down_action,
+                                       self._scroll_settings_action)
+        self._scroll_menu.insertSeparator(self._scroll_down_action)
+
+        top.addWidget(self._toolbar_group((self.btn_colorpick, self.btn_repeat)))
         top.addStretch(1)
         self.btn_history = self._tbtn("history", "")
         self.btn_settings = self._tbtn("settings", "")
@@ -4087,11 +4339,10 @@ class MainWindow(QtWidgets.QWidget):
         for b in (self.btn_copy, self.btn_pin, self.btn_beautify, self.btn_save):
             b.hide()
         self._add_annotation_widget(self.btn_ocr, tools)
-        self._add_annotation_widget(self.btn_output, tools)
-        # Consume spare width after the actions.  Without a trailing stretch,
-        # Qt distributes the unused width across the row's gaps, which makes
-        # the icon grid drift right on wide editor windows.
+        # Keep annotation and OCR actions packed to the left; let the output
+        # menu use the right edge of the row.
         tools.addStretch(1)
+        self._add_annotation_widget(self.btn_output, tools)
         layout.addWidget(card)
 
         # ---------- Canvas ---------- #
@@ -4257,6 +4508,10 @@ class MainWindow(QtWidgets.QWidget):
         }
         for w, key in tips.items():
             w.setToolTip(t(key))
+        delay_scope_note = (
+            "延时也适用于窗口截图和截屏取词。" if _LANG == "zh" else
+            "Delay also applies to window capture and text grab.")
+        self.btn_single.setToolTip(t("cap_region") + "\n" + delay_scope_note)
         self.btn_output.setText(t("lab_output"))
         self.btn_ocr_all.setText(t("t_ocr_all"))
         self.btn_copy_all.setText(t("t_copy_all"))
@@ -4848,8 +5103,7 @@ class MainWindow(QtWidgets.QWidget):
             self._inline_editor = InlineCaptureEditor(img,self._capture_rect,
                 lambda action,canvas:self._finish_inline(action,canvas,status),self,
                 background=self._capture_background)
-            output='MP4 + GIF' if self.settings.value('record_gif',False,type=bool) else 'MP4'
-            self._inline_editor.action_buttons['record'].setToolTip(t('cap_record')+' · '+output)
+            self._inline_editor.action_buttons['record'].setToolTip(t('cap_record') + (' · 设置帧率、分辨率和时长' if _LANG == 'zh' else ' · Frame rate, resolution and duration'))
             self._inline_editor.dismissed.connect(self._inline_closed)
             return
         self._commit_capture(img,status)
@@ -4870,7 +5124,7 @@ class MainWindow(QtWidgets.QWidget):
                 if action == 'scroll':
                     QtCore.QTimer.singleShot(180,lambda:self._manual_start(phys,gr))
                 else:
-                    QtCore.QTimer.singleShot(180,lambda:self._start_record(gr))
+                    return self._start_record(gr)
                 return True
         image=canvas.render_flattened()
         if action == 'save':
@@ -5292,6 +5546,11 @@ class MainWindow(QtWidgets.QWidget):
         self.tray.setToolTip(f"{t('app_name')} — {t('app_comment')}")
 
     def quit_app(self):
+        export_dialog = getattr(self, '_record_export', None)
+        if export_dialog is not None:
+            export_dialog.raise_(); export_dialog.activateWindow(); return
+        if getattr(self, "_record_pending", None):
+            self._on_record_stop()
         if self.worker is not None and self.worker.isRunning():
             self.worker.abort()
             self.worker.wait()
@@ -5395,11 +5654,11 @@ class MainWindow(QtWidgets.QWidget):
         tabs.addTab(o, t("tab_ocr"))
 
         # ---------- Recording ---------- #
-        r = QtWidgets.QWidget(); r.setObjectName("settingsPage"); rf = QtWidgets.QFormLayout(r)
-        fps = QtWidgets.QSpinBox(); fps.setRange(5, 60); fps.setValue(s.value("record_fps", 15, type=int))
-        rf.addRow(t("set_fps"), fps)
-        cb_gif = QtWidgets.QCheckBox(t("set_gif")); cb_gif.setChecked(s.value("record_gif", False, type=bool))
-        rf.addRow(cb_gif)
+        r = QtWidgets.QWidget(); r.setObjectName("settingsPage"); rf = QtWidgets.QVBoxLayout(r)
+        record_options = RecordingOptions(s, parent=r)
+        rf.addWidget(record_options)
+        rf.addWidget(QtWidgets.QLabel('每次录屏前可调整，结束后选择导出格式' if _LANG == 'zh'
+                                      else 'Adjust before recording; choose the format after stopping'))
         tabs.addTab(r, t("tab_record"))
 
         # ---------- Interface ---------- #
@@ -5499,8 +5758,7 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("ocr_psm", psm.currentData())
         s.setValue("ocr_enhance", enh.isChecked())
         s.setValue("auto_ocr", cb_autoocr.isChecked())
-        s.setValue("record_fps", fps.value())
-        s.setValue("record_gif", cb_gif.isChecked())
+        record_options.save(s)
         s.setValue("ui_theme", theme.currentData())
         s.setValue("ui_accent", accent.currentData())
         s.setValue("ui_lang", ui_lang.currentData())
@@ -5656,9 +5914,12 @@ class MainWindow(QtWidgets.QWidget):
         if path and out is not None and out.save(path):
             self.status.setText(("Beautified export: " if _LANG == "en" else "已美化导出:") + path)
 
-    # ===================== P6: recording ===================== #
+    # ===================== Recording ===================== #
     def toggle_record(self):
-        if self._recorder is not None:
+        active_dialog = getattr(self, '_record_export', None) or getattr(self, '_record_setup', None)
+        if active_dialog is not None:
+            active_dialog.raise_(); active_dialog.activateWindow(); return
+        if self._recorder is not None or getattr(self, '_record_pending', None):
             self._on_record_stop()
             return
         if self._unfinished_capture():
@@ -5670,69 +5931,156 @@ class MainWindow(QtWidgets.QWidget):
 
     def _begin_record_select(self):
         self.selector = RegionSelector(mode="region")
-        output='MP4 + GIF' if self.settings.value('record_gif',False,type=bool) else 'MP4'
-        self.selector.hint_text=(f'Record {output}: select a region, Esc to cancel' if _LANG=='en'
-                                 else f'录屏 {output}：框选录制区域，Esc 取消')
+        self.selector.hint_text=('Select recording region, Esc to cancel' if _LANG == 'en'
+                                 else '框选录屏区域，Esc 取消')
         self.selector.selected.connect(self._start_record)
         self.selector.cancelled.connect(self._restore)
         self.selector.show()
         self.selector.activateWindow(); self.selector.raise_()
 
     def _start_record(self, gr, frozen=None):
-        import os
-        from pathlib import Path
-        if self._recorder is not None:
+        if self._recorder is not None or getattr(self, '_record_pending', None):
             return
-        dpr=QtWidgets.QApplication.primaryScreen().devicePixelRatio()
-        phys=(int(gr.x()*dpr),int(gr.y()*dpr),int(gr.width()*dpr),int(gr.height()*dpr))
-        phys=phys[:2]+(phys[2]-phys[2]%2,phys[3]-phys[3]%2)
-        gr=QRect(round(phys[0]/dpr),round(phys[1]/dpr),round(phys[2]/dpr),round(phys[3]/dpr))
-        directory=self.settings.value('save_dir',os.path.expanduser('~/Videos'))
-        try:os.makedirs(directory,exist_ok=True)
+        screen = QtWidgets.QApplication.screenAt(gr.center()) or QtWidgets.QApplication.primaryScreen()
+        dpr = screen.devicePixelRatio()
+        phys = (int(gr.x()*dpr), int(gr.y()*dpr), int(gr.width()*dpr), int(gr.height()*dpr))
+        phys = phys[:2] + (phys[2]-phys[2]%2, phys[3]-phys[3]%2)
+        if min(phys[2:]) < 2:
+            self._restore(); return
+        gr = QRect(round(phys[0]/dpr), round(phys[1]/dpr), round(phys[2]/dpr), round(phys[3]/dpr))
+        dialog = RecordSetupDialog(self.settings, phys[2:], self)
+        self._record_setup = dialog
+        accepted = dialog.exec_() == QtWidgets.QDialog.Accepted
+        self._record_setup = None
+        if not accepted:
+            dialog.deleteLater()
+            if self._inline_editor is None:
+                self._restore()
+            return False
+        options = dialog.options.values()
+        dialog.options.save(self.settings)
+        dialog.deleteLater()
+        self.hide()
+        self._record_pending = (phys, gr, options)
+        self._record_border = ScrollRegionOverlay(gr)
+        self._recbar = RecordBar(self._on_record_stop, gr, fps=options['fps'],
+                                 output_size=options['output_size'], duration=options['duration'])
+        self._recbar._t.stop()
+        self._record_countdown_left = options['countdown']
+        self._record_countdown = QtCore.QTimer(self)
+        self._record_countdown.setInterval(1000)
+        self._record_countdown.timeout.connect(self._record_countdown_tick)
+        self._recbar.show_on_top()
+        if self._record_countdown_left:
+            self._recbar.set_countdown(self._record_countdown_left)
+            self._record_countdown.start()
+        else:
+            # Give the settings dialog a chance to leave the Xorg framebuffer.
+            self._record_countdown.setInterval(180)
+            self._record_countdown.start()
+        return True
+
+    def _record_countdown_tick(self):
+        self._record_countdown_left -= 1
+        if self._record_countdown_left > 0:
+            self._recbar.set_countdown(self._record_countdown_left)
+            return
+        self._record_countdown.stop(); self._record_countdown.deleteLater()
+        self._record_countdown = None
+        pending = self._record_pending
+        self._record_pending = None
+        if pending:
+            self._begin_recording(*pending)
+
+    def _begin_recording(self, phys, gr, options):
+        import tempfile
+        from pathlib import Path
+        try:
+            self._record_temp = tempfile.mkdtemp(prefix='kapture-record-')
         except OSError as error:
-            self._restore();self.status.setText(str(error));return
-        self._rec_out=str(Path(directory)/Path(self._make_filename()).with_suffix('.mp4'))
-        export_gif=self.settings.value('record_gif',False,type=bool)
-        rec=Recorder(phys,self._rec_out,fps=self.settings.value('record_fps',15,type=int),
-                     parent=self,export_gif=export_gif)
-        self._recorder=rec
-        self._record_border=ScrollRegionOverlay(gr)
-        self._recbar=RecordBar(self._on_record_stop,gr,export_gif)
+            self._close_record_controls(); self._restore(); self.status.setText(str(error)); return
+        self._rec_out = str(Path(self._record_temp) / 'recording.mp4')
+        rec = Recorder(phys, self._rec_out, fps=options['fps'], parent=self,
+                       output_size=options['output_size'], duration=options['duration'])
+        self._recorder = rec
         rec.phase.connect(self._record_phase)
         rec.progress.connect(self._recbar.set_progress)
         rec.completed.connect(self._record_completed)
-        self._recbar.show_on_top()
-        self.status.setText(('Recording: ' if _LANG=='en' else '录屏中：')+('MP4 + GIF' if export_gif else 'MP4'))
+        self._recbar.start_timer()
+        self.status.setText('Recording…' if _LANG == 'en' else '录屏中…')
         rec.start()
 
     def _record_phase(self, phase):
-        if getattr(self,'_record_border',None):
-            self._record_border.close();self._record_border.deleteLater();self._record_border=None
-        if getattr(self,'_recbar',None):
+        if getattr(self, '_record_border', None):
+            self._record_border.close(); self._record_border.deleteLater(); self._record_border = None
+        if getattr(self, '_recbar', None):
             self._recbar.set_phase(phase)
 
+    def _close_record_controls(self):
+        for name in ('_record_border', '_recbar'):
+            widget = getattr(self, name, None)
+            if widget:
+                widget.close(); widget.deleteLater(); setattr(self, name, None)
+
     def _on_record_stop(self):
-        if self._recorder is not None:
+        if getattr(self, '_record_pending', None):
+            self._record_pending = None
+            self._record_countdown.stop(); self._record_countdown.deleteLater()
+            self._record_countdown = None
+            self._close_record_controls(); self._restore()
+        elif self._recorder is not None:
             self._recorder.stop()
 
-    def _record_completed(self, paths, error):
-        rec=self._recorder
-        self._recorder=None
-        if getattr(self,'_record_border',None):
-            self._record_border.close();self._record_border.deleteLater();self._record_border=None
-        if getattr(self,'_recbar',None):
-            self._recbar.close();self._recbar.deleteLater();self._recbar=None
-        if rec is not None:rec.deleteLater()
-        msg=(('Saved: ' if _LANG=='en' else '已保存：')+paths) if paths else ''
+    def _record_completed(self, path, error):
+        import os
+        import shutil
+        from pathlib import Path
+        rec = self._recorder
+        self._recorder = None
+        self._close_record_controls()
+        self._restore()
+        paths = []
+        if path and not error:
+            directory = self.settings.value('save_dir', os.path.expanduser('~/Videos'))
+            filename = str(Path(self._make_filename()).with_suffix('.mp4'))
+            if getattr(self, '_quit_after_record', False):
+                try:
+                    Path(directory).mkdir(parents=True, exist_ok=True)
+                    target = Path(directory) / filename
+                    # Exiting must retain the recording without asking for export settings.
+                    if target.exists():
+                        target = target.with_stem(target.stem + '-' + str(time.time_ns()))
+                    shutil.copyfile(path, target)
+                    paths = [str(target)]
+                except OSError as exc:
+                    error = str(exc)
+            else:
+                dialog = RecordExportDialog(path, rec.fps, rec._duration, directory, filename, self)
+                self._record_export = dialog
+                dialog.exec_()
+                self._record_export = None
+                paths = dialog.saved_paths
+                dialog.deleteLater()
+        if rec is not None:
+            rec.deleteLater()
+        if getattr(self, '_record_temp', None):
+            if error:
+                error += '\n' + self._record_temp
+            else:
+                shutil.rmtree(self._record_temp)
+            self._record_temp = None
         if error:
-            msg+=('\n' if msg else '')+('Recording/export failed: ' if _LANG=='en' else '录制或导出失败：')+error
-        self.status.setText(msg)
-        self.tray.showMessage(t('app_name'),msg,QtWidgets.QSystemTrayIcon.Warning if error
-                              else QtWidgets.QSystemTrayIcon.Information,6000)
-        if getattr(self,'_quit_after_record',False):
-            self.quit_app()
+            message = ('Recording/export failed: ' if _LANG == 'en' else '录制或导出失败：') + error
+        elif paths:
+            message = ('Saved: ' if _LANG == 'en' else '已保存：') + '\n'.join(paths)
         else:
-            self._restore()
+            message = 'Recording discarded' if _LANG == 'en' else '已放弃录屏'
+        self.status.setText(message)
+        if paths or error:
+            self.tray.showMessage(t('app_name'), message, QtWidgets.QSystemTrayIcon.Warning if error
+                                  else QtWidgets.QSystemTrayIcon.Information, 6000)
+        if getattr(self, '_quit_after_record', False):
+            self.quit_app()
 
 
 SERVER_NAME = "scrollshot-single-instance"

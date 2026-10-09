@@ -233,14 +233,22 @@ class InlineEditingTest(unittest.TestCase):
     def test_inline_record_uses_selection_without_second_selector(self):
         edit=self.open_capture()
         edit._region=QtCore.QRect(30,40,180,100)
-        pending=[]
-        with mock.patch.object(QtCore.QTimer,'singleShot',side_effect=lambda delay,fn:pending.append(fn)):
+        with mock.patch.object(self.w, '_start_record', return_value=True) as start:
             edit.finish('record')
         self.assertIsNone(self.w._inline_editor)
-        self.assertEqual(self.w.history,[])
-        with mock.patch.object(self.w,'_start_record') as start:
-            pending[-1]()
-        start.assert_called_once_with(QtCore.QRect(30,40,180,100))
+        self.assertEqual(self.w.history, [])
+        start.assert_called_once_with(QtCore.QRect(30, 40, 180, 100))
+
+    def test_cancel_record_setup_restores_inline_selection_and_annotations(self):
+        edit = self.open_capture()
+        edit._region = QtCore.QRect(30, 40, 180, 100)
+        self.draw(edit.canvas)
+        with mock.patch.object(kapture.RecordSetupDialog, 'exec_', return_value=QtWidgets.QDialog.Rejected):
+            edit.finish('record')
+        self.assertIs(self.w._inline_editor, edit)
+        self.assertTrue(edit.isVisible())
+        self.assertEqual(len(edit.canvas.items), 1)
+        self.assertIsNone(self.w._recorder)
 
     def test_save_dialog_releases_overlay_and_cancel_restores_selection(self):
         edit=self.open_capture()

@@ -41,7 +41,7 @@ Capture, extract text, and keep visual references at hand on Linux X11.
 | OCR | Chinese and English recognition, automatic OCR after capture, editor text selection, and screen text grab. |
 | Pin images | Keep images on top, zoom, adjust opacity, annotate with the grouped toolbar, and drag across recognized words to copy. |
 | Edit and export | Undo/redo, move/delete annotations, change color/width, type directly on the canvas and double-click to edit text, and crop. Output saves original-size annotations or adds a decorative background, padding, rounded corners, and shadow. |
-| Record | Red recording frame, MP4 with optional additional GIF, save/export progress, and Esc to stop. |
+| Record | Shared setup from inline capture and the editor: frame rate, proportional resolution/custom width, countdown and timed stop. Choose MP4, GIF or MKV afterwards, with multiple exports and progress feedback. |
 | Desktop | GNOME and KDE Plasma 5 shortcuts, themes, system tray, and background launch. |
 
 The app has English and Simplified Chinese interfaces. OCR uses Tesseract; screen recording uses ffmpeg.
@@ -99,6 +99,8 @@ GNOME restores saved Kapture shortcuts at startup. Change conflicting combinatio
 | Stop scrolling capture / close focused pin | Esc |
 
 Captures open in-place editing by default: Enter copies, Esc cancels, and the toolbar opens the full editor. The “open editor after capture” setting takes priority; turn both off to use thumbnails. Right-click a pin to annotate or select text; restore click-through pins from the tray.
+
+Scroll speed lives in the scrolling-capture menu; screenshot delay lives in the capture menu. Recording has its own countdown and duration settings.
 
 History stays on this machine and survives restarts: up to 10 screenshots and 10 clipboard images, with a separate 40-million-pixel budget per collection; the newest image is always retained. Clear both collections from the history window.
 

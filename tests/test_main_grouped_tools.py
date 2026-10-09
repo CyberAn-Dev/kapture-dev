@@ -91,7 +91,16 @@ class MainGroupedToolsTest(unittest.TestCase):
         self.assertTrue(icons)
         for widget in icons:
             self.assertEqual(widget.width(), 40 if widget.property("editorDropdown") else 36)
-        self.assertGreater(row.itemAt(17).geometry().width(), 0)
+        output_index = row.indexOf(self.window.btn_output)
+        self.assertGreater(output_index, 0)
+        self.assertIsNone(row.itemAt(output_index - 1).widget())
+        self.assertGreater(row.itemAt(output_index - 1).geometry().width(), 0)
+        row_rect = row.geometry()
+        row_right = row.parentWidget().mapTo(
+            self.window, QtCore.QPoint(row_rect.right() + 1, row_rect.y())).x()
+        output_right = self.window.btn_output.mapTo(
+            self.window, QtCore.QPoint(self.window.btn_output.width(), 0)).x()
+        self.assertLessEqual(abs(row_right - output_right), 1)
 
     def test_tool_menus_choose_one_canvas_tool_and_keep_group_highlights_exclusive(self):
         groups = getattr(self.window, "_main_tool_groups", {})
@@ -153,6 +162,34 @@ class MainGroupedToolsTest(unittest.TestCase):
         self.assertTrue(self.window.btn_save.isHidden())
         self.assertTrue(self.window.btn_beautify.isHidden())
         self.assertTrue(self.window._output_label.isHidden())
+
+    def test_capture_delay_and_scroll_speed_live_in_their_capture_menus(self):
+        self.assertIs(self.window.btn_single.menu(), self.window._capture_menu)
+        self.assertIs(self.window.btn_scroll.menu(), self.window._scroll_menu)
+        self.assertEqual(self.window.btn_single.popupMode(),
+                         QtWidgets.QToolButton.MenuButtonPopup)
+        self.assertIs(self.window._capture_settings_action.defaultWidget(),
+                      self.window._capture_options_widget)
+        self.assertIs(self.window._capture_options_widget.findChild(
+            QtWidgets.QSpinBox, "captureDelay"), self.window.delay)
+        self.assertIn(self.window._capture_settings_action,
+                      self.window._capture_menu.actions())
+        self.assertIs(self.window._scroll_settings_action.defaultWidget(),
+                      self.window._scroll_options_widget)
+        self.assertIs(self.window._scroll_options_widget.findChild(
+            QtWidgets.QSpinBox, "scrollSpeed"), self.window.speed)
+        scroll_actions = self.window._scroll_menu.actions()
+        self.assertIn(self.window._scroll_down_action, scroll_actions)
+        self.assertIn(self.window._scroll_up_action, scroll_actions)
+        self.assertLess(scroll_actions.index(self.window._scroll_settings_action),
+                        scroll_actions.index(self.window._scroll_down_action))
+        self.assertIn("窗口截图和截屏取词", self.window.btn_single.toolTip())
+
+        kapture.set_lang("en")
+        self.window._retranslate()
+        self.assertIn("window capture and text grab", self.window.btn_single.toolTip())
+        self.assertEqual(self.window._lab_delay.text(), "Delay")
+        self.assertEqual(self.window._lab_speed.text(), "Speed")
 
     def test_toolbar_fits_820_and_700_pixel_window_widths(self):
         for language in ("zh", "en"):
