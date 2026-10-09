@@ -14,7 +14,7 @@
 
 ## Completed
 
-- General settings now includes an opt-in “Keep the main window visible during screenshots” checkbox for self-capture. Region/text/scroll, window and repeat capture respect it; the default remains minimization. Settings cancellation leaves the preference unchanged. Real Xorg selection preserves exact main-toolbar pixels in the frozen image and inline editor.
+- General settings now includes an opt-in “Keep the main window visible during screenshots” checkbox for self-capture. Region/text/scroll, window and repeat capture respect it; the default remains minimization. Settings cancellation leaves the preference unchanged. While Settings is open, screenshot entry keeps it visible and capture overlays temporarily take modal input ownership. Capturing, copying or cancelling preserves unsaved settings. Native X11 window-event tests cover selection/copy/Esc and exact Settings pixels in an isolated Xephyr display; the live desktop input defect was reproduced before and after the fix, while live pixel testing was blocked by the desktop lock screen. Real Xorg selection previously verified exact main-toolbar pixels in the frozen image and inline editor.
 
 - Main-editor plain icon buttons are 36px wide; dropdown buttons reserve a separate 10px arrow area within a 40px button, with right content padding to center the icon/arrow pair and give them more breathing room. The output dropdown arrow is vertically centered. Spare width separates left-aligned annotation controls from the output dropdown on the right. Scroll speed is in the long-capture menu; the existing shared screenshot delay is in the regular capture menu.
 

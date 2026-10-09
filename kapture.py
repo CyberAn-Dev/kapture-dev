@@ -1288,14 +1288,14 @@ class RegionSelector(QtWidgets.QWidget):
     ZOOM = 8             # zoom factor
     SNAP_T = 10          # edge-snap threshold (logical pixels)
 
-    def __init__(self, mode="region"):
-        super().__init__()
+    def __init__(self, mode="region", parent=None):
+        super().__init__(parent)
         self.mode = mode
         # Bypass the window manager (like ScrollHud/RecordBar/WindowPicker) so the
         # overlay covers the whole virtual desktop including the GNOME top bar and
         # dock; a WM-managed Qt.Tool window is clamped to the work area, which offset
         # the selection from the frozen full-geometry frame.
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
                             Qt.X11BypassWindowManagerHint)
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
@@ -2924,6 +2924,8 @@ class InlineCaptureEditor(QtWidgets.QWidget):
                          Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.StrongFocus)
+        if isinstance(parent, QtWidgets.QDialog) and parent.isModal():
+            self.setWindowModality(Qt.ApplicationModal)
         self._on_finish = on_finish
         self._confirmed = False
         screen = QtWidgets.QApplication.screenAt(region.center()) if region else None
@@ -4137,6 +4139,7 @@ class MainWindow(QtWidgets.QWidget):
         self._pending_history = {}
         QtWidgets.QApplication.instance().aboutToQuit.connect(self._history_writer.shutdown)
         self._inline_editor = None
+        self._settings_dialog = None
         self._capture_background = None
         self._capture_rect = None
         self._canvas_base_key = None
@@ -4884,12 +4887,14 @@ class MainWindow(QtWidgets.QWidget):
         self._capture_background = None
         self._capture_rect = None
         self._mode = mode
-        if not self.settings.value("capture_keep_main", False, type=bool):
+        if not self.settings.value("capture_keep_main", False, type=bool) and self._settings_dialog is None:
             self.showMinimized()
         QtCore.QTimer.singleShot(250, self._show_selector)
 
     def _show_selector(self):
-        self.selector = RegionSelector()
+        self.selector = RegionSelector(parent=self._settings_dialog)
+        if self._settings_dialog is not None:
+            self.selector.setWindowModality(Qt.ApplicationModal)
         self.selector.selected.connect(self._on_region)
         self.selector.cancelled.connect(self._restore)
         self.selector.show()
@@ -4898,7 +4903,10 @@ class MainWindow(QtWidgets.QWidget):
 
     def _restore(self):
         self.showNormal()
-        self.activateWindow()
+        if self._settings_dialog is not None:
+            self._settings_dialog.raise_(); self._settings_dialog.activateWindow()
+        else:
+            self.activateWindow()
 
     def _on_region(self, gr: QRect, frozen=None):
         selector=getattr(self,'selector',None)
@@ -5025,7 +5033,7 @@ class MainWindow(QtWidgets.QWidget):
     def capture_window(self):
         if self._unfinished_capture():
             return
-        if not self.settings.value("capture_keep_main", False, type=bool):
+        if not self.settings.value("capture_keep_main", False, type=bool) and self._settings_dialog is None:
             self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
@@ -5063,7 +5071,7 @@ class MainWindow(QtWidgets.QWidget):
         phys = self._last_phys
         dpr=QtWidgets.QApplication.primaryScreen().devicePixelRatio()
         self._capture_rect=QRect(*(int(v/dpr) for v in phys))
-        if not self.settings.value("capture_keep_main", False, type=bool):
+        if not self.settings.value("capture_keep_main", False, type=bool) and self._settings_dialog is None:
             self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
@@ -5217,9 +5225,10 @@ class MainWindow(QtWidgets.QWidget):
                 self._inline_editor.close()
             if getattr(self,'_thumb',None):
                 self._thumb.close()
-            self.hide()
+            if self._settings_dialog is None:
+                self.hide()
             self._inline_editor = InlineCaptureEditor(img,self._capture_rect,
-                lambda action,canvas:self._finish_inline(action,canvas,status),self,
+                lambda action,canvas:self._finish_inline(action,canvas,status),self._settings_dialog or self,
                 background=self._capture_background)
             self._inline_editor.action_buttons['record'].setToolTip(t('cap_record') + (' · 设置帧率、分辨率和时长' if _LANG == 'zh' else ' · Frame rate, resolution and duration'))
             self._inline_editor.dismissed.connect(self._inline_closed)
@@ -5682,6 +5691,8 @@ class MainWindow(QtWidgets.QWidget):
         QtWidgets.QApplication.quit()
 
     def show_settings(self):
+        if self._settings_dialog is not None:
+            self._settings_dialog.raise_(); self._settings_dialog.activateWindow(); return
         import os
         s = self.settings
         backend = shortcut_backend()
@@ -5820,7 +5831,12 @@ class MainWindow(QtWidgets.QWidget):
         bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
         outer.addWidget(bb)
 
-        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+        self._settings_dialog = dlg
+        try:
+            accepted = dlg.exec_() == QtWidgets.QDialog.Accepted
+        finally:
+            self._settings_dialog = None
+        if not accepted:
             self._apply_style()                      # discard the temporary preview
             return
         if backend:
