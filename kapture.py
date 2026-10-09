@@ -4,7 +4,7 @@
 
 Features:
   - Region / window / auto-scroll / manual-scroll capture
-  - Annotate, blur, pin to screen, beautify export
+  - Annotate, blur, pin to screen, save images
   - OCR (Tesseract), screen recording (ffmpeg)
   - Bilingual UI (English / Chinese) via the TR table
 
@@ -212,7 +212,6 @@ TR = {
     "e_ocr": {"zh": "OCR 提取文字", "en": "OCR extract text"},
     "e_copy": {"zh": "复制图片", "en": "Copy image"},
     "e_pin": {"zh": "钉到屏幕", "en": "Pin to screen"},
-    "e_beautify": {"zh": "美化导出", "en": "Beautify export"},
     "e_save": {"zh": "保存图片", "en": "Save image"},
     "ocr_lang": {"zh": "语言", "en": "Language"},
     "ocr_layout": {"zh": "版面", "en": "Layout"},
@@ -280,7 +279,6 @@ TR = {
     # Dialogs / status
     "dlg_save": {"zh": "保存截图", "en": "Save screenshot"},
     "dlg_savedir": {"zh": "选择保存目录", "en": "Choose save folder"},
-    "dlg_beautify": {"zh": "美化导出", "en": "Beautify export"},
     "dlg_pickcolor": {"zh": "选择标注颜色", "en": "Pick annotation color"},
     "st_ready": {"zh": "就绪", "en": "Ready"},
     "st_copied": {"zh": "已复制到剪贴板", "en": "Copied to clipboard"},
@@ -409,9 +407,6 @@ def line_icon(name, color="#d2d2da", size=22):
         for x,y in [(16,4),(15,11),(18,14),(6,14),(9,11),(8,4)]:
             path.lineTo(Pt(x,y))
         p.drawPath(path);L(12,14,12,21)
-    elif name == "beautify":   # sparkle/star
-        for (cx, cy, s) in [(11, 11, 6), (17, 6, 2.6)]:
-            L(cx - s, cy, cx + s, cy); L(cx, cy - s, cx, cy + s)
     elif name == "save":
         L(12, 4, 12, 15); head(12, 15, math.pi / 2); L(6, 19, 18, 19)
     elif name == "rect":
@@ -4423,8 +4418,7 @@ class MainWindow(QtWidgets.QWidget):
                 ("ocr", "ocr", "e_ocr", lambda: self.run_ocr()),
                 ("copy", "copy", "e_copy", lambda: self.copy_image()),
                 ("pin", "pin", "e_pin", lambda: self.pin_image()),
-                ("save", "save", "e_save", lambda: self.save_image()),
-                ("beautify", "beautify", "e_beautify", lambda: self.beautify_export())):
+                ("save", "save", "e_save", lambda: self.save_image())):
             action = self._output_menu.addAction(line_icon(icon), t(label_key))
             action.setObjectName("output:" + key)
             action.triggered.connect(callback)
@@ -4469,9 +4463,8 @@ class MainWindow(QtWidgets.QWidget):
 
         self.btn_copy = self._tbtn("copy", "")
         self.btn_pin = self._tbtn("pin", "")
-        self.btn_beautify = self._tbtn("beautify", "")
         self.btn_save = self._tbtn("save", "")
-        for b in (self.btn_copy, self.btn_pin, self.btn_beautify, self.btn_save):
+        for b in (self.btn_copy, self.btn_pin, self.btn_save):
             b.hide()
         self._add_annotation_widget(self.btn_ocr, tools)
         # Keep annotation and OCR actions packed to the left; let the output
@@ -4537,7 +4530,6 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_colorpick.clicked.connect(self.pick_color_screen)
         self.btn_repeat.clicked.connect(self.repeat_last)
         self.btn_record.clicked.connect(self.toggle_record)
-        self.btn_beautify.clicked.connect(self.beautify_export)
         self.btn_history.clicked.connect(self.show_history)
         self.btn_settings.clicked.connect(self.show_settings)
         self._undo_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence.Undo, self)
@@ -4638,7 +4630,7 @@ class MainWindow(QtWidgets.QWidget):
             self.btn_settings: "t_settings", self.btn_color: "a_color",
             self.btn_undo: "a_undo", self.btn_redo: "a_redo", self.btn_clear: "a_clear",
             self.btn_ocr: "e_ocr", self.btn_copy: "e_copy", self.btn_pin: "e_pin",
-            self.btn_beautify: "e_beautify", self.btn_save: "e_save",
+            self.btn_save: "e_save",
             self.btn_output: "lab_output",
         }
         for w, key in tips.items():
@@ -4658,7 +4650,7 @@ class MainWindow(QtWidgets.QWidget):
                 action.setText(t("a_gaussian_blur" if name == "gaussian" else "a_" + name))
         for name, action in self._output_actions.items():
             action.setText(t({"ocr": "e_ocr", "copy": "e_copy", "pin": "e_pin",
-                              "save": "e_save", "beautify": "e_beautify"}[name]))
+                              "save": "e_save"}[name]))
         self._lab_delay.setText(t("lab_delay"))
         self._lab_speed.setText(t("lab_speed"))
         self._scroll_down_action.setText(t("scroll_down"))
@@ -4692,7 +4684,7 @@ class MainWindow(QtWidgets.QWidget):
                 (self.btn_settings, "settings"), (self.btn_undo, "undo"),
                 (self.btn_redo,"redo"), (self.btn_clear, "clear"), (self.btn_ocr, "ocr"),
                 (self.btn_copy, "copy"), (self.btn_pin, "pin"),
-                (self.btn_beautify, "beautify"), (self.btn_save, "save"),
+                (self.btn_save, "save"),
                 (self.btn_output, "save")):
             icon = line_icon(name, colors["on_accent"] if button is self.btn_single
                              else colors["icon"],size=button.iconSize().width())
@@ -4717,7 +4709,7 @@ class MainWindow(QtWidgets.QWidget):
         self._scroll_down_action.setIcon(line_icon("scroll_down", colors["icon"], size=22))
         self._scroll_up_action.setIcon(line_icon("scroll_up", colors["icon"], size=22))
         output_icons = {"ocr": "ocr", "copy": "copy", "pin": "pin",
-                        "save": "save", "beautify": "beautify"}
+                        "save": "save"}
         for name, action in self._output_actions.items():
             action.setIcon(line_icon(output_icons[name], colors["icon"], size=22))
 
@@ -6034,46 +6026,6 @@ class MainWindow(QtWidgets.QWidget):
     def _load_history(self, qimg):
         self._load_into_editor(qimage_to_bgr(qimg))
         self.status.setText("已打开历史截图" if _LANG == "zh" else "Loaded from history")
-
-    # ===================== P5: beautify export ===================== #
-    def _beautify_image(self):
-        """Place the current (annotated) screenshot on a gradient background with rounded corners and a shadow; return a QImage."""
-        flat = self.canvas.render_flattened()
-        if flat is None:
-            return None
-        src = QtGui.QPixmap.fromImage(flat)
-        pad, radius = 64, 18
-        out_w, out_h = src.width() + pad * 2, src.height() + pad * 2
-        out = QtGui.QImage(out_w, out_h, QtGui.QImage.Format_ARGB32)
-        out.fill(Qt.transparent)
-        p = QtGui.QPainter(out)
-        p.setRenderHint(QtGui.QPainter.Antialiasing)
-        grad = QtGui.QLinearGradient(0, 0, out_w, out_h)
-        grad.setColorAt(0, QtGui.QColor("#ff9a9e"))
-        grad.setColorAt(1, QtGui.QColor("#a18cd1"))
-        bg = QtGui.QPainterPath()
-        bg.addRoundedRect(QtCore.QRectF(0, 0, out_w, out_h), 24, 24)
-        p.fillPath(bg, grad)
-        img_rect = QtCore.QRectF(pad, pad, src.width(), src.height())
-        sh = QtGui.QPainterPath()
-        sh.addRoundedRect(img_rect.translated(0, 8), radius, radius)
-        p.fillPath(sh, QtGui.QColor(0, 0, 0, 90))
-        clip = QtGui.QPainterPath()
-        clip.addRoundedRect(img_rect, radius, radius)
-        p.setClipPath(clip)
-        p.drawPixmap(int(pad), int(pad), src)
-        p.end()
-        return out
-
-    def beautify_export(self):
-        if self.image_bgr is None:
-            self.status.setText(t("st_need_shot"))
-            return
-        out = self._beautify_image()
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, t("dlg_beautify"), "beautified.png", "PNG (*.png)")
-        if path and out is not None and out.save(path):
-            self.status.setText(("Beautified export: " if _LANG == "en" else "已美化导出:") + path)
 
     # ===================== Recording ===================== #
     def toggle_record(self):

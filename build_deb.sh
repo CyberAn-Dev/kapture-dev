@@ -85,7 +85,7 @@ Description: Screenshot, OCR and screen recording tool for Linux (X11)
  region, window and scrolling long screenshots, on-image annotation,
  cursor-style word selection over OCR results, built-in Tesseract OCR for
  Chinese and English, screen recording to MP4/GIF, pin-to-screen and
- beautified export.
+ saving annotated images at their original size.
  .
  Fork of $UPSTREAM_HOMEPAGE with GNOME shortcut fixes, WM-bypass region
  overlay, floating capture card and in-editor word selection.

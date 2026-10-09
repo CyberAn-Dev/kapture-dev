@@ -134,7 +134,7 @@
 
 - Native text-edit context menus follow the selected app language through Qt translation, preserving built-in action behavior, disabled states, and keyboard shortcuts. Avoid an external translation-package dependency for these common commands; unknown strings fall through to Qt normally.
 
-- Main-editor annotation categories use dropdowns like capture-time editing; maintain exactly one active tool and update menu labels/icons when language/theme changes. Place labeled Output in the same row, retaining OCR/copy/pin/save/beautify commands. Save keeps original annotated dimensions; Beautify is a presentation export with decorative framing.
+- Main-editor annotation categories use dropdowns like capture-time editing; maintain exactly one active tool and update menu labels/icons when language/theme changes. Place labeled Output in the same row, retaining OCR/copy/pin/save commands. Save keeps original annotated dimensions in PNG/JPEG. Remove decorative export entirely at the user’s request rather than retaining a hidden entry or implementation.
 
 - Main editor annotation controls use 36px plain icon buttons and 40px split-menu buttons with a 14px arrow hit area and 12px right content padding; inset the split-button menu-arrow by 5px to center the icon/arrow pair with balanced outer margins while retaining independent menu clicks; the output menu indicator is centered at the right. Use fixed horizontal sizing for separators/width control and a trailing layout stretch; unused width separates annotation controls from the right-aligned output menu. Scroll speed lives in the long-capture menu; the existing delay remains shared by region/window/text captures and lives in the regular capture menu.
 

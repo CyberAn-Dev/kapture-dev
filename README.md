@@ -40,7 +40,7 @@ Capture, extract text, and keep visual references at hand on Linux X11.
 | Scrolling capture | Start manual scrolling in the red frame from the toolbar; automatic up/down modes, live preview, and duplicate-aware stitching. |
 | OCR | Chinese and English recognition, automatic OCR after capture, editor text selection, and screen text grab. |
 | Pin images | Keep images on top, zoom, adjust opacity, annotate with the grouped toolbar, and drag across recognized words to copy. |
-| Edit and export | Undo/redo, move/delete annotations, change color/width, type directly on the canvas and double-click to edit text, and crop. Output saves original-size annotations or adds a decorative background, padding, rounded corners, and shadow. |
+| Edit and save | Undo/redo, move/delete annotations, change color/width, type directly on the canvas and double-click to edit text, crop, and save the annotated image at its original size. |
 | Record | A region-adjacent recording toolbar from inline capture and the editor: dropdown presets and custom inputs for frame rate, resolution, countdown and duration. Choose MP4, GIF or MKV afterwards, with multiple exports and progress feedback. |
 | Desktop | GNOME and KDE Plasma 5 shortcuts, themes, system tray, and background launch. |
 

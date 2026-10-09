@@ -1,6 +1,6 @@
 # Kapture
 
-> Kapture is a free, open-source (MIT) all-in-one screenshot, OCR, and screen-recording tool for Linux X11 desktops (Kubuntu, Ubuntu, KDE Plasma). It is written in Python with PyQt5 and bundles region/window capture, automatic scrolling long screenshots, on-image annotation, Tesseract-based Chinese & English OCR, screen recording (MP4/GIF), pin-to-screen, and beautified export into a single tray app.
+> Kapture is a free, open-source (MIT) all-in-one screenshot, OCR, and screen-recording tool for Linux X11 desktops (Kubuntu, Ubuntu, KDE Plasma). It is written in Python with PyQt5 and bundles region/window capture, automatic scrolling long screenshots, on-image annotation, Tesseract-based Chinese & English OCR, screen recording (MP4/GIF), and pin-to-screen into a single tray app.
 
 ## What Kapture does
 
@@ -12,7 +12,7 @@
 - **Annotation**: rectangle, ellipse, arrow, line, pen, text, numbered steps, highlight, blur/mosaic (to hide sensitive info), magnifier, crop — with adjustable color and line width, undo, and clear.
 - **Screen recording**: export to MP4 or GIF with adjustable frame rate.
 - **Pin to screen**: keep a screenshot floating on top (drag to move, scroll to zoom, double-click to close).
-- **Beautify export**: gradient background, rounded corners, drop shadow.
+- **Save annotated images**: keep the original image size while preserving annotations.
 - **Workflow**: global keyboard shortcuts (written into KDE), system tray, single instance, configurable save folder and filename template, auto-copy/auto-save, history, accent themes, and a bilingual Chinese/English UI.
 
 ## Who it is for

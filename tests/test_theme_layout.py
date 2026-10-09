@@ -61,10 +61,9 @@ class ThemeLayoutTest(unittest.TestCase):
     def test_default_width_keeps_output_menu_and_settings_visible(self):
         self.assertLessEqual(self.window.width(), 820)
         self.assertTrue(self.window.btn_save.isHidden())
-        self.assertTrue(self.window.btn_beautify.isHidden())
         output_actions = {action.objectName() for action in self.window.btn_output.menu().actions()}
         self.assertIn("output:save", output_actions)
-        self.assertIn("output:beautify", output_actions)
+        self.assertNotIn("output:beautify", output_actions)
         for button in (self.window.btn_output, self.window.btn_settings):
             right = button.mapTo(self.window, QtCore.QPoint(0, 0)).x() + button.width()
             self.assertLessEqual(right, self.window.width() - 10)

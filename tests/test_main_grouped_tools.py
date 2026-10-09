@@ -200,17 +200,16 @@ class MainGroupedToolsTest(unittest.TestCase):
         actions = {action.objectName(): action for action in output.menu().actions()
                    if action.objectName().startswith("output:")}
         self.assertEqual(set(actions), {"output:ocr", "output:copy", "output:pin",
-                                        "output:save", "output:beautify"})
+                                        "output:save"})
         self.assertIsNotNone(self.window.btn_ocr.menu())
         calls = []
         for key, method in (("ocr", "run_ocr"), ("copy", "copy_image"),
-                            ("pin", "pin_image"), ("save", "save_image"),
-                            ("beautify", "beautify_export")):
+                            ("pin", "pin_image"), ("save", "save_image")):
             with self.subTest(output=key), mock.patch.object(
                     self.window, method, side_effect=lambda *args, _key=key, **kwargs:
                     calls.append(_key)):
                 actions["output:" + key].trigger()
-        self.assertEqual(calls, ["ocr", "copy", "pin", "save", "beautify"])
+        self.assertEqual(calls, ["ocr", "copy", "pin", "save"])
 
     def test_output_and_annotation_actions_share_one_toolbar_row(self):
         self.assertFalse(self.window.btn_ocr.isHidden())
@@ -218,7 +217,6 @@ class MainGroupedToolsTest(unittest.TestCase):
         self.assertTrue(self.window.btn_copy.isHidden())
         self.assertTrue(self.window.btn_pin.isHidden())
         self.assertTrue(self.window.btn_save.isHidden())
-        self.assertTrue(self.window.btn_beautify.isHidden())
         self.assertTrue(self.window._output_label.isHidden())
 
     def test_capture_delay_and_scroll_speed_live_in_their_capture_menus(self):
