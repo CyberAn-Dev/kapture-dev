@@ -1302,9 +1302,13 @@ class RegionSelector(QtWidgets.QWidget):
     ZOOM = 8             # zoom factor
     SNAP_T = 10          # edge-snap threshold (logical pixels)
 
-    def __init__(self, mode="region", parent=None):
+    def __init__(self, mode="region", parent=None, keep_visible=False):
         super().__init__(parent)
         self.mode = mode
+        # keep_visible: stay on screen after emitting `selected`; the owner closes
+        # us once the inline editor has taken over, so the frozen frame never
+        # flashes away and reveals the live desktop in between.
+        self.keep_visible = keep_visible
         # Bypass the window manager (like ScrollHud/RecordBar/WindowPicker) so the
         # overlay covers the whole virtual desktop including the GNOME top bar and
         # dock; a WM-managed Qt.Tool window is clamped to the work area, which offset
@@ -1418,6 +1422,19 @@ class RegionSelector(QtWidgets.QWidget):
                 r.width() * self.dpr, r.height() * self.dpr).toRect())
             p.setPen(QtGui.QPen(QtGui.QColor(0, 170, 255), 2))
             p.drawRect(r)
+            # Grip dots at the four corners and edge midpoints, matching the
+            # inline editor's handles, so they are visible while still dragging.
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            p.setPen(QtGui.QPen(QtGui.QColor('white'), 1))
+            p.setBrush(QtGui.QColor('#249cff'))
+            cx, cy = r.center().x(), r.center().y()
+            for gx, gy in ((r.left(), r.top()), (r.right(), r.top()),
+                           (r.left(), r.bottom()), (r.right(), r.bottom()),
+                           (cx, r.top()), (cx, r.bottom()),
+                           (r.left(), cy), (r.right(), cy)):
+                p.drawEllipse(QtCore.QPoint(gx, gy), 5, 5)
+            p.setBrush(QtCore.Qt.NoBrush)
+            p.setRenderHint(QtGui.QPainter.Antialiasing, False)
             p.setPen(QtGui.QColor(255, 255, 255))
             p.drawText(r.left(), max(r.top() - 6, 12),
                        f"{r.width()} × {r.height()}")
@@ -1438,7 +1455,7 @@ class RegionSelector(QtWidgets.QWidget):
         src_px = self.LOUPE // s
         return s, src_px, src_px * s
 
-    def _draw_loupe(self, p, lp):
+    def _draw_loupe(self, p, lp, boundary=None):
         L = self.LOUPE
         s, src_px, side = self._loupe_geometry()
         sx = int(lp.x() * self.dpr) - src_px // 2
@@ -1468,6 +1485,23 @@ class RegionSelector(QtWidgets.QWidget):
         # Highlight the exact sampled pixel, then the frame
         p.setPen(QtGui.QPen(QtGui.QColor(0, 170, 255), 2))
         p.drawRect(ox + (src_px // 2) * s, oy + (src_px // 2) * s, s, s)
+        if boundary is not None and not boundary.isNull():
+            # Overlay the selection border (logical rect) inside the zoom so the
+            # exact crop edge is visible while hovering a grip or the frame:
+            # kept-inside reads as "in", an edge line reads as "this is the cut".
+            bsx, bsy = int(sx * self.dpr), int(sy * self.dpr)   # loupe top-left in source px
+            bx, by = ox + (boundary.x() - bsx) * s, oy + (boundary.y() - bsy) * s
+            bw = (boundary.width() - 1) * s
+            bh = (boundary.height() - 1) * s
+            p.setRenderHint(QtGui.QPainter.Antialiasing, False)
+            p.setClipRect(box)
+            pen = QtGui.QPen(QtGui.QColor(0, 170, 255), 2)
+            p.setPen(pen)
+            p.drawLine(bx, by, bx, by + bh)          # left edge
+            p.drawLine(bx + bw, by, bx + bw, by + bh)  # right edge
+            p.drawLine(bx, by, bx + bw, by)          # top edge
+            p.drawLine(bx, by + bh, bx + bw, by + bh)  # bottom edge
+            p.setClipping(False)
         p.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255), 1))
         p.drawRect(box)
 
@@ -1525,6 +1559,13 @@ class RegionSelector(QtWidgets.QWidget):
         self.cur = e.pos()
         self.update()
 
+    def _finish_selection(self, gr, crop):
+        """Emit the selection; with keep_visible the frozen overlay stays up as a
+        seamless backdrop until the owner closes it after the editor appears."""
+        if not self.keep_visible:
+            self.close()
+        self.selected.emit(gr, crop)
+
     def mouseReleaseEvent(self, e):
         if self.mode != "region" or self.origin is None:
             return
@@ -1532,18 +1573,18 @@ class RegionSelector(QtWidgets.QWidget):
             # Click without dragging: grab the hovered window whole (PixPin/Snipaste style)
             hv = self._hover
             gr = QRect(self.mapToGlobal(hv.topLeft()), hv.size()).intersected(self.geometry())
-            self.close()
             if gr.width() > 8 and gr.height() > 8:
-                self.selected.emit(gr, self._crop_frozen(hv))
+                self._finish_selection(gr, self._crop_frozen(hv))
             else:
+                self.close()
                 self.cancelled.emit()
             return
         r = QRect(self.origin, self.cur).normalized()
         gr = QRect(self.mapToGlobal(r.topLeft()), r.size())
-        self.close()
         if gr.width() > 8 and gr.height() > 8:
-            self.selected.emit(gr, self._crop_frozen(r))
+            self._finish_selection(gr, self._crop_frozen(r))
         else:
+            self.close()
             self.cancelled.emit()
 
     def _crop_frozen(self, r):
@@ -2901,7 +2942,7 @@ class CaptureResizeHandle(QtWidgets.QWidget):
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         painter.setPen(QtGui.QPen(QtGui.QColor('white'),1))
         painter.setBrush(QtGui.QColor('#249cff'))
-        painter.drawEllipse(self.rect().center(),3,3)
+        painter.drawEllipse(self.rect().center(),5,5)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -2920,7 +2961,12 @@ class CaptureResizeHandle(QtWidgets.QWidget):
     def mouseReleaseEvent(self, event):
         self.parent()._end_resize()
 
+    def enterEvent(self, event):
+        self.parent()._hover_edge=self.edge
+
     def leaveEvent(self, event):
+        if self.parent()._hover_edge==self.edge:
+            self.parent()._hover_edge=None
         if self.parent()._resize_edge is None:
             self.parent().loupe.hide()
 
@@ -2934,7 +2980,8 @@ class CaptureLoupe(QtWidgets.QWidget):
     def paintEvent(self, event):
         owner=self.parent()
         painter=QtGui.QPainter(self)
-        owner._draw_loupe(painter,owner._loupe_pos)
+        boundary=owner.viewport.geometry() if owner._can_resize() else None
+        owner._draw_loupe(painter,owner._loupe_pos,boundary)
 
 
 class InlineCaptureEditor(QtWidgets.QWidget):
@@ -2954,6 +3001,7 @@ class InlineCaptureEditor(QtWidgets.QWidget):
         screen = screen or QtWidgets.QApplication.primaryScreen()
         self._background = background
         self._resize_edge = None
+        self._hover_edge = None      # edge whose grip the mouse is over (keyboard nudging)
         self._loupe_pos = QtCore.QPoint()
         self.handles = {}
         bounds = background[1] if background is not None else screen.geometry()
@@ -3058,10 +3106,13 @@ class InlineCaptureEditor(QtWidgets.QWidget):
             ty=max(available.top()+4,area.top()-self.tools.height()-10)
         self.tools.move(tx,ty); self.tools.raise_()
         x,y,w,h=area.x(),area.y(),area.width(),area.height()
-        grips={'nw':QRect(x-5,y-5,10,10),'ne':QRect(x+w-5,y-5,10,10),
-               'sw':QRect(x-5,y+h-5,10,10),'se':QRect(x+w-5,y+h-5,10,10),
-               'n':QRect(x+5,y-5,max(1,w-10),10),'s':QRect(x+5,y+h-5,max(1,w-10),10),
-               'w':QRect(x-5,y+5,10,max(1,h-10)),'e':QRect(x+w-5,y+5,10,max(1,h-10))}
+        # 14px grips keep the 12px dots centered on the drawn border, which runs
+        # through x-1/y-1..x+w/y+h (adjusted(-1,-1,1,1)). Qt rect centers truncate,
+        # so east/south grips anchor at w-6/h-6 to land on x+w / y+h.
+        grips={'nw':QRect(x-7,y-7,14,14),'ne':QRect(x+w-6,y-7,14,14),
+               'sw':QRect(x-7,y+h-7,14,14),'se':QRect(x+w-6,y+h-6,14,14),
+               'n':QRect(x+7,y-7,max(1,w-14),14),'s':QRect(x+7,y+h-6,max(1,w-14),14),
+               'w':QRect(x-7,y+7,14,max(1,h-14)),'e':QRect(x+w-6,y+7,14,max(1,h-14))}
         for edge,handle in self.handles.items():
             handle.setGeometry(grips[edge]);handle.setVisible(self._can_resize());handle.raise_()
         self.action_buttons['scroll'].setEnabled(self._can_resize())
@@ -3085,24 +3136,71 @@ class InlineCaptureEditor(QtWidgets.QWidget):
         if 'e' in self._resize_edge: r.setRight(max(x,r.left()+8))
         if 'n' in self._resize_edge: r.setTop(min(y,r.bottom()-8))
         if 's' in self._resize_edge: r.setBottom(max(y,r.top()+8))
+        self._apply_region(r)
+        self._loupe_pos=self.mapFromGlobal(global_pos)
+        self.loupe.update()
+
+    def _apply_region(self, r, document=None, start=None):
+        """Move or resize the frozen selection to r: re-crop the base from the frozen
+        desktop, translate annotations, and reframe undo/redo. Shared by mouse
+        resizing and keyboard nudging (WASD/arrows nudges one pixel at a time)."""
+        start=self._resize_start if start is None else start
+        document=self._resize_document if document is None else document
         self._region=r
+        bounds=self._background[1]
         local=r.translated(-bounds.topLeft())
         base=self.bg_img.copy(round(local.x()*self.dpr),round(local.y()*self.dpr),
                               round(local.width()*self.dpr),round(local.height()*self.dpr))
-        offset=QtCore.QPointF((self._resize_start.x()-r.x())*self.dpr,
-                             (self._resize_start.y()-r.y())*self.dpr)
+        offset=QtCore.QPointF((start.x()-r.x())*self.dpr,
+                             (start.y()-r.y())*self.dpr)
         def reframe(state):
             result=self.canvas._copy_content_state(state)
             result['base']=base
             for item in result['items']:
                 self.canvas._translate_item(item,offset)
             return result
-        state=reframe(self._resize_document)
-        state['undo']=[reframe(value) for value in self._resize_document['undo']]
-        state['redo']=[reframe(value) for value in self._resize_document['redo']]
+        state=reframe(document)
+        state['undo']=[reframe(value) for value in document['undo']]
+        state['redo']=[reframe(value) for value in document['redo']]
         self.canvas.restore_document(state)
-        self._loupe_pos=self.mapFromGlobal(global_pos)
-        self.loupe.update()
+
+    def _nudge_region(self, dx, dy):
+        """Keyboard nudging: adjust the hovered edge(s) by (dx, dy) pixels, or move
+        the whole selection when no grip is hovered. Returns True when handled."""
+        if not self._can_resize():
+            return False
+        r=QRect(self._region)
+        bounds=self._background[1]
+        edge=self._resize_edge if self._resize_edge is not None else self._hover_edge
+        if edge is None:
+            # Clamp the translation itself so the selection never leaves or shrinks at the border.
+            dx=max(bounds.left()-r.left(),min(dx,bounds.right()-r.right()))
+            dy=max(bounds.top()-r.top(),min(dy,bounds.bottom()-r.bottom()))
+            nr=r.translated(dx,dy)
+            if nr==r:
+                return True
+            self._apply_region(nr, document=self.canvas.snapshot_document(), start=r)
+            self._loupe_pos=QtCore.QPoint(nr.center())
+            self.loupe.update()
+            return True
+        else:
+            nr=QRect(r)
+            if 'w' in edge: nr.setLeft(max(bounds.left(),min(r.left()+dx,r.right()-8)))
+            if 'e' in edge: nr.setRight(min(bounds.right(),max(r.right()+dx,r.left()+8)))
+            if 'n' in edge: nr.setTop(max(bounds.top(),min(r.top()+dy,r.bottom()-8)))
+            if 's' in edge: nr.setBottom(min(bounds.bottom(),max(r.bottom()+dy,r.top()+8)))
+            if nr==r:
+                return True
+            self._apply_region(nr, document=self.canvas.snapshot_document(), start=r)
+            # Keep the loupe on the edge being adjusted (midpoint of that edge in
+            # the new rect), so keyboard nudging follows the grip under the cursor.
+            self._loupe_pos=QtCore.QPoint(
+                (nr.left()+nr.right())//2 if edge in ('n','s') else
+                (nr.right() if 'e' in edge else nr.left()),
+                (nr.top()+nr.bottom())//2 if edge in ('e','w') else
+                (nr.bottom() if 's' in edge else nr.top()))
+            self.loupe.update()
+            return True
 
     def _end_resize(self):
         self._resize_edge=None
@@ -3119,6 +3217,20 @@ class InlineCaptureEditor(QtWidgets.QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self.grabKeyboard()
+
+    _NUDGE_KEYS={Qt.Key_Left:(-1,0),Qt.Key_Right:(1,0),Qt.Key_Up:(0,-1),Qt.Key_Down:(0,1),
+                 Qt.Key_A:(-1,0),Qt.Key_D:(1,0),Qt.Key_W:(0,-1),Qt.Key_S:(0,1)}
+
+    def keyPressEvent(self, e):
+        # WASD/arrows nudge the frozen selection one pixel at a time (Shift: 10px).
+        # A hovered grip adjusts that edge; otherwise the whole selection moves.
+        nudge=self._NUDGE_KEYS.get(e.key())
+        if nudge is not None and not e.modifiers() & (Qt.ControlModifier|Qt.AltModifier) \
+                and getattr(self.canvas,'_text_editor',None) is None:
+            step=10 if e.modifiers() & Qt.ShiftModifier else 1
+            if self._nudge_region(nudge[0]*step,nudge[1]*step):
+                return
+        super().keyPressEvent(e)
 
     def finish(self, action):
         if self._confirmed:
@@ -4915,7 +5027,8 @@ class MainWindow(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(250, self._show_selector)
 
     def _show_selector(self):
-        self.selector = RegionSelector(parent=self._settings_dialog)
+        self.selector = RegionSelector(parent=self._settings_dialog,
+                                       keep_visible=(self._mode == "single"))
         if self._settings_dialog is not None:
             self.selector.setWindowModality(Qt.ApplicationModal)
         self.selector.selected.connect(self._on_region)
@@ -4940,7 +5053,19 @@ class MainWindow(QtWidgets.QWidget):
         phys = (int(gr.left() * dpr), int(gr.top() * dpr),
                 int(gr.width() * dpr), int(gr.height() * dpr))
         if self._mode == "single":
-            QtCore.QTimer.singleShot(150, lambda: self._single_shot(phys, frozen))
+            retain = (frozen is not None and self.delay.value() <= 0)
+            # The frozen frame is already in hand and the overlay is still up
+            # (keep_visible): present immediately instead of waiting 150 ms,
+            # so the live desktop never flashes between overlay and editor.
+            # With a countdown delay the overlay must retire now instead —
+            # an opaque frozen frame would cover the desktop while waiting;
+            # _present_capture closes the retained one once the editor is up.
+            if not retain and selector is not None and getattr(selector,'keep_visible',False):
+                selector.close()
+            if retain:
+                self._single_shot(phys, frozen)
+            else:
+                QtCore.QTimer.singleShot(150, lambda: self._single_shot(phys, frozen))
         elif self._mode == "textgrab":
             QtCore.QTimer.singleShot(150, lambda: self._textgrab_shot(phys, frozen))
         elif self._mode == "manual":
@@ -5254,6 +5379,11 @@ class MainWindow(QtWidgets.QWidget):
             background=self._capture_background)
         self._inline_editor.action_buttons['record'].setToolTip(t('cap_record') + (' · 设置帧率、分辨率和时长' if _LANG == 'zh' else ' · Frame rate, resolution and duration'))
         self._inline_editor.dismissed.connect(self._inline_closed)
+        # The editor is up over the same frozen pixels; retire the retained
+        # selection overlay only now to avoid any flash between the two.
+        selector=getattr(self,'selector',None)
+        if selector is not None and getattr(selector,'keep_visible',False):
+            selector.close()
 
     def _inline_closed(self):
         self._inline_editor = None
