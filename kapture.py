@@ -163,6 +163,8 @@ TR = {
     "pin_select_text": {"zh":"选取文字", "en":"Select text"},
     "finish_edit": {"zh":"完成标注", "en":"Finish editing"},
     "save_failed": {"zh":"保存失败，请选择可写入的路径", "en":"Save failed; choose a writable path"},
+    "set_capture_keep_main": {"zh": "截图时保留主界面显示（可截取本工具）",
+                              "en": "Keep the main window visible during screenshots"},
     "set_inline": {"zh":"截图后原位编辑（未选择直接打开编辑器时）", "en":"Edit in place after capture (unless opening the editor)"},
     "clear_history": {"zh":"清空截图与剪贴板图片历史", "en":"Clear screenshot and clipboard image history"},
 
@@ -4882,7 +4884,8 @@ class MainWindow(QtWidgets.QWidget):
         self._capture_background = None
         self._capture_rect = None
         self._mode = mode
-        self.showMinimized()
+        if not self.settings.value("capture_keep_main", False, type=bool):
+            self.showMinimized()
         QtCore.QTimer.singleShot(250, self._show_selector)
 
     def _show_selector(self):
@@ -5022,7 +5025,8 @@ class MainWindow(QtWidgets.QWidget):
     def capture_window(self):
         if self._unfinished_capture():
             return
-        self.showMinimized()
+        if not self.settings.value("capture_keep_main", False, type=bool):
+            self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
         QtCore.QTimer.singleShot(300, self._begin_window_pick)
@@ -5059,7 +5063,8 @@ class MainWindow(QtWidgets.QWidget):
         phys = self._last_phys
         dpr=QtWidgets.QApplication.primaryScreen().devicePixelRatio()
         self._capture_rect=QRect(*(int(v/dpr) for v in phys))
-        self.showMinimized()
+        if not self.settings.value("capture_keep_main", False, type=bool):
+            self.showMinimized()
         if getattr(self, "_thumb", None):
             self._thumb.close()
         QtCore.QTimer.singleShot(250, lambda: self._present_capture(
@@ -5703,11 +5708,14 @@ class MainWindow(QtWidgets.QWidget):
         cb_edit = QtWidgets.QCheckBox(t("set_openeditor")); cb_edit.setChecked(s.value("open_editor", False, type=bool))
         cb_inline = QtWidgets.QCheckBox(t('set_inline'))
         cb_inline.setChecked(s.value('inline_edit',True,type=bool))
+        cb_capture_keep_main = QtWidgets.QCheckBox(t("set_capture_keep_main"))
+        cb_capture_keep_main.setObjectName("captureKeepMain")
+        cb_capture_keep_main.setChecked(s.value("capture_keep_main", False, type=bool))
         cb_background = QtWidgets.QCheckBox(t("set_start_hidden"))
         cb_background.setChecked(s.value("start_hidden", False, type=bool))
         cb_snap = QtWidgets.QCheckBox(t("set_snap_windows"))
         cb_snap.setChecked(s.value("snap_windows", True, type=bool))
-        for cb in (cb_copy, cb_save, cb_edit, cb_inline, cb_background, cb_snap):
+        for cb in (cb_copy, cb_save, cb_edit, cb_inline, cb_capture_keep_main, cb_background, cb_snap):
             gf.addRow(cb)
         tabs.addTab(g, t("tab_general"))
 
@@ -5866,6 +5874,7 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("open_editor", cb_edit.isChecked())
         s.setValue("start_hidden", cb_background.isChecked())
         s.setValue("inline_edit", cb_inline.isChecked())
+        s.setValue("capture_keep_main", cb_capture_keep_main.isChecked())
         s.setValue("snap_windows", cb_snap.isChecked())
         s.setValue("ocr_lang", lang.currentText())
         s.setValue("ocr_psm", psm.currentData())

@@ -100,6 +100,8 @@ GNOME restores saved Kapture shortcuts at startup. Change conflicting combinatio
 
 Captures open in-place editing by default: Enter copies, Esc cancels, and the toolbar opens the full editor. The “open editor after capture” setting takes priority; turn both off to use thumbnails. Right-click a pin to annotate or select text; restore click-through pins from the tray.
 
+To capture Kapture itself, enable **Keep the main window visible during screenshots** in **Settings → General**.
+
 Scroll speed lives in the scrolling-capture menu; screenshot delay lives in the capture menu. Recording has its own countdown and duration settings.
 
 History stays on this machine and survives restarts: up to 10 screenshots and 10 clipboard images, with a separate 40-million-pixel budget per collection; the newest image is always retained. Clear both collections from the history window.
