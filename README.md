@@ -98,7 +98,7 @@ GNOME restores saved Kapture shortcuts at startup. Change conflicting combinatio
 | Delete selected annotation | Delete |
 | Stop scrolling capture / close focused pin | Esc |
 
-Captures open in-place editing by default: Enter copies, Esc cancels, and the toolbar opens the full editor. The “open editor after capture” setting takes priority; turn both off to use thumbnails. Right-click a pin to annotate or select text; restore click-through pins from the tray.
+Captures open in-place editing: Enter copies, Esc cancels, and the toolbar opens the full editor. Right-click a pin to annotate or select text; restore click-through pins from the tray.
 
 To capture Kapture itself, enable **Keep the main window visible during screenshots** in **Settings → General**. Capture shortcuts also work while Settings is open and preserve unsaved changes.
 

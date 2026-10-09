@@ -1,4 +1,4 @@
-"""Screenshot OCR starts automatically while preserving image copy behavior."""
+"""Editor handoff runs automatic OCR while preserving image copy behavior."""
 
 import os
 import tempfile
@@ -32,12 +32,13 @@ class AutoOcrTest(unittest.TestCase):
         self.settings = QtCore.QSettings("ScrollShot", "ScrollShot")
         self.settings.clear()
         self.settings.setValue("ocr_lang", "eng")
-        self.settings.setValue("inline_edit", False)
         self.window = kapture.MainWindow()
         self.window.show()
         self.app.processEvents()
 
     def tearDown(self):
+        if self.window._inline_editor is not None:
+            self.window._inline_editor.close()
         for worker in list(self.window._ocr_workers):
             worker.wait()
         self.app.processEvents()
@@ -51,15 +52,14 @@ class AutoOcrTest(unittest.TestCase):
         image = np.full((40, 120, 3), 255, dtype=np.uint8)
         with mock.patch("pytesseract.image_to_string", return_value="hello") as engine:
             self.window._present_capture(image, "Captured")
-            # The result waits until the image is actually in the editor UI.
-            self.window._open_editor()
+            self.window._inline_editor.finish("editor")
             for _ in range(200):
                 QtTest.QTest.qWait(10)
                 if self.window.text.toPlainText() == "hello":
                     break
         self.assertTrue(engine.called)
         self.assertEqual(self.window.text.toPlainText(), "hello")
-        self.assertIs(self.window.image_bgr, image)
+        np.testing.assert_array_equal(self.window.image_bgr, image)
         self.assertTrue(self.app.clipboard().mimeData().hasImage())
 
     def test_automatic_ocr_result_waits_for_the_editor(self):
@@ -67,7 +67,8 @@ class AutoOcrTest(unittest.TestCase):
         # text must not appear in a hidden/stale editor, only when it opens.
         image = np.full((40, 120, 3), 255, dtype=np.uint8)
         with mock.patch("pytesseract.image_to_string", return_value="held"):
-            self.window._present_capture(image, "Captured")
+            self.window._load_into_editor(image, show=False)
+            self.window.run_ocr(copy_result=False)
             for _ in range(200):
                 QtTest.QTest.qWait(10)
                 if self.window._ocr_pending:
@@ -78,7 +79,7 @@ class AutoOcrTest(unittest.TestCase):
         self.assertEqual(self.window.text.toPlainText(), "held")
         self.assertIsNone(self.window._ocr_pending)
 
-    def test_auto_ocr_can_be_disabled_without_opening_editor(self):
+    def test_auto_ocr_can_be_disabled_for_editor_handoff(self):
         def disable_auto_ocr(dialog):
             checkbox = next(box for box in dialog.findChildren(QtWidgets.QCheckBox)
                             if box.text() == kapture.t("set_autoocr"))
@@ -93,9 +94,10 @@ class AutoOcrTest(unittest.TestCase):
         image = np.full((40, 120, 3), 255, dtype=np.uint8)
         with mock.patch("pytesseract.image_to_string", return_value="hello") as engine:
             self.window._present_capture(image, "Captured")
+            self.window._inline_editor.finish("editor")
             self.app.processEvents()
         engine.assert_not_called()
-        self.assertIsNone(self.window.image_bgr)
+        np.testing.assert_array_equal(self.window.image_bgr, image)
 
     def test_older_capture_result_cannot_replace_newer_text(self):
         started = threading.Event()
@@ -113,14 +115,15 @@ class AutoOcrTest(unittest.TestCase):
 
         image = np.full((40, 120, 3), 255, dtype=np.uint8)
         with mock.patch("pytesseract.image_to_string", side_effect=recognize):
-            self.window._present_capture(image, "First")
+            self.window._load_into_editor(image, show=False)
+            self.window.run_ocr(copy_result=False)
             for _ in range(200):
                 QtTest.QTest.qWait(10)
                 if started.is_set():
                     break
             self.assertTrue(started.is_set())
-            self.window._present_capture(image.copy(), "Second")
-            self.window._open_editor()      # results display once the image is on screen
+            self.window._load_into_editor(image.copy())
+            self.window.run_ocr(copy_result=False)
             for _ in range(200):
                 QtTest.QTest.qWait(10)
                 if self.window.text.toPlainText() == "new":

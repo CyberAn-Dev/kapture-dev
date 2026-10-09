@@ -85,11 +85,22 @@ class InlineEditingTest(unittest.TestCase):
         self.assertIn('标注 / 编辑',labels)
         self.assertIn('选取文字',labels)
 
-    def test_explicit_editor_setting_still_opens_editor(self):
-        self.w.settings.setValue('open_editor',True)
-        self.w._present_capture(self.img,'Capture')
-        self.assertTrue(self.w.isVisible())
-        self.assertIsNone(getattr(self.w,'_inline_editor',None))
+    def test_old_capture_preferences_cannot_bypass_inline_editing(self):
+        self.w.settings.setValue('open_editor', True)
+        self.w.settings.setValue('inline_edit', False)
+        edit = self.open_capture()
+        self.assertTrue(edit.isVisible())
+        self.assertFalse(self.w.isVisible())
+
+    def test_settings_no_longer_offer_capture_editor_switches(self):
+        def inspect(dialog):
+            labels = [box.text() for box in dialog.findChildren(QtWidgets.QCheckBox)]
+            self.assertNotIn('截图后打开编辑器', labels)
+            self.assertNotIn('截图后原位编辑', labels)
+            dialog.reject()
+            return QtWidgets.QDialog.Rejected
+        with mock.patch.object(QtWidgets.QDialog, 'exec_', inspect):
+            self.w.show_settings()
 
     def test_pin_edits_copy_and_handoff_keep_document(self):
         pin=self.w._new_pin(kapture.bgr_to_qimage(self.img))

@@ -167,9 +167,6 @@ TR = {
                               "en": "Keep main window during capture"},
     "set_capture_keep_main_hint": {"zh": "保留 Kapture 主界面，可将本工具截入截图。",
                                     "en": "Keep Kapture visible so it can be included in a screenshot."},
-    "set_inline": {"zh":"截图后原位编辑", "en":"Edit capture in place"},
-    "set_inline_hint": {"zh":"启用“截图后打开编辑器”时，优先打开编辑器。",
-                         "en":"Opening the editor takes precedence over in-place editing."},
     "clear_history": {"zh":"清空截图与剪贴板图片历史", "en":"Clear screenshot and clipboard image history"},
 
     "app_title": {"zh": "Kapture", "en": "Kapture"},
@@ -236,10 +233,6 @@ TR = {
     "set_tmpl": {"zh": "文件名模板", "en": "Filename template"},
     "set_autocopy": {"zh": "截图后自动复制到剪贴板", "en": "Auto-copy to clipboard after capture"},
     "set_autosave": {"zh": "截图后自动保存到目录", "en": "Auto-save to folder after capture"},
-    "set_openeditor": {"zh": "截图后打开编辑器",
-                       "en": "Open editor after capture"},
-    "set_openeditor_hint": {"zh": "关闭后显示缩略图，或按“原位编辑”设置处理。",
-                             "en": "When off, show a thumbnail or follow the in-place editing setting."},
     "set_start_hidden": {"zh": "启动时隐藏主界面",
                          "en": "Start with main window hidden"},
     "set_start_hidden_hint": {"zh": "可从托盘或快捷键打开主界面。",
@@ -266,10 +259,10 @@ TR = {
                     "en": "Enhance OCR image"},
     "set_ocr_enh_hint": {"zh": "放大截图并保留字体细节，以提升识别效果。",
                           "en": "Upscale the image while preserving text detail for better recognition."},
-    "set_autoocr": {"zh": "截图后自动识别",
-                    "en": "Run OCR after capture"},
-    "set_autoocr_hint": {"zh": "识别结果在编辑器中显示；是否打开由“截图后打开编辑器”决定。",
-                          "en": "Show recognized text in the editor; the open-editor setting controls whether it appears."},
+    "set_autoocr": {"zh": "打开编辑器时自动识别",
+                    "en": "Run OCR when opening the editor"},
+    "set_autoocr_hint": {"zh": "进入编辑器时识别文字，不覆盖已复制的截图。",
+                          "en": "Recognize text when opening the editor without replacing the copied image."},
     "set_ocr_note": {"zh": "提示：中文需安装对应的 Tesseract 语言包",
                      "en": "Note: install matching tesseract language data"},
     "set_fps": {"zh": "帧率 (fps)", "en": "Frame rate (fps)"},
@@ -5246,24 +5239,21 @@ class MainWindow(QtWidgets.QWidget):
     def _manual_stop(self):
         self._auto_scroll_stop()
 
-    # --- after capture: copy to clipboard by default + bottom-left floating thumbnail --- #
+    # --- after capture: edit in place, then confirm an output action --- #
     def _present_capture(self, img, status):
         if self._unfinished_capture():
             return
-        if self.settings.value('inline_edit',True,type=bool) and not self.settings.value('open_editor',False,type=bool):
-            if self._inline_editor is not None:
-                self._inline_editor.close()
-            if getattr(self,'_thumb',None):
-                self._thumb.close()
-            if self._settings_dialog is None:
-                self.hide()
-            self._inline_editor = InlineCaptureEditor(img,self._capture_rect,
-                lambda action,canvas:self._finish_inline(action,canvas,status),self._settings_dialog or self,
-                background=self._capture_background)
-            self._inline_editor.action_buttons['record'].setToolTip(t('cap_record') + (' · 设置帧率、分辨率和时长' if _LANG == 'zh' else ' · Frame rate, resolution and duration'))
-            self._inline_editor.dismissed.connect(self._inline_closed)
-            return
-        self._commit_capture(img,status)
+        if self._inline_editor is not None:
+            self._inline_editor.close()
+        if getattr(self,'_thumb',None):
+            self._thumb.close()
+        if self._settings_dialog is None:
+            self.hide()
+        self._inline_editor = InlineCaptureEditor(img,self._capture_rect,
+            lambda action,canvas:self._finish_inline(action,canvas,status),self._settings_dialog or self,
+            background=self._capture_background)
+        self._inline_editor.action_buttons['record'].setToolTip(t('cap_record') + (' · 设置帧率、分辨率和时长' if _LANG == 'zh' else ' · Frame rate, resolution and duration'))
+        self._inline_editor.dismissed.connect(self._inline_closed)
 
     def _inline_closed(self):
         self._inline_editor = None
@@ -5304,26 +5294,6 @@ class MainWindow(QtWidgets.QWidget):
         if action == 'editor' and self.settings.value('auto_ocr',True,type=bool):
             self.run_ocr(copy_result=False)
         return True
-
-    def _commit_capture(self, img, status):
-        self._ocr_serial += 1          # an older OCR result must not replace this capture
-        self._add_history(bgr_to_qimage(img), status)
-        # default behavior: copy image to clipboard (auto_copy on by default)
-        copied = self.settings.value("auto_copy", True, type=bool)
-        if copied:
-            QtWidgets.QApplication.clipboard().setImage(bgr_to_qimage(img))
-        if self.settings.value("auto_save", False, type=bool):
-            self._auto_save(img)
-        self.status.setText(status + ("  " + t("st_copied") if copied else ""))
-        # Auto OCR needs the captured image in the editor to display its result, but it
-        # does not have to be on screen: show the window only when open_editor is on.
-        auto_ocr = self.settings.value("auto_ocr", True, type=bool)
-        show = self.settings.value("open_editor", False, type=bool)
-        if auto_ocr or show:
-            self._load_into_editor(img, show=show)
-        self._show_thumbnail(img)
-        if auto_ocr:
-            QtCore.QTimer.singleShot(0, lambda captured=img: self._auto_ocr_for(captured))
 
     def _add_history(self, qimg, desc):
         qimg = QtGui.QImage(qimg)
@@ -5563,10 +5533,6 @@ class MainWindow(QtWidgets.QWidget):
             self.btn_color.setIcon(swatch_icon(c))
 
     # --- OCR --- #
-    def _auto_ocr_for(self, img):
-        if self.image_bgr is img:
-            self.run_ocr(copy_result=False)
-
     def run_ocr(self, copy_result=True, img=None):
         img = self.image_bgr if img is None else img
         if img is None:
@@ -5746,9 +5712,6 @@ class MainWindow(QtWidgets.QWidget):
         gf.addRow(t("set_tmpl"), tmpl)
         cb_copy = QtWidgets.QCheckBox(t("set_autocopy")); cb_copy.setChecked(s.value("auto_copy", True, type=bool))
         cb_save = QtWidgets.QCheckBox(t("set_autosave")); cb_save.setChecked(s.value("auto_save", False, type=bool))
-        cb_edit = QtWidgets.QCheckBox(t("set_openeditor")); cb_edit.setChecked(s.value("open_editor", False, type=bool))
-        cb_inline = QtWidgets.QCheckBox(t('set_inline'))
-        cb_inline.setChecked(s.value('inline_edit',True,type=bool))
         cb_capture_keep_main = QtWidgets.QCheckBox(t("set_capture_keep_main"))
         cb_capture_keep_main.setObjectName("captureKeepMain")
         cb_capture_keep_main.setChecked(s.value("capture_keep_main", False, type=bool))
@@ -5756,11 +5719,10 @@ class MainWindow(QtWidgets.QWidget):
         cb_background.setChecked(s.value("start_hidden", False, type=bool))
         cb_snap = QtWidgets.QCheckBox(t("set_snap_windows"))
         cb_snap.setChecked(s.value("snap_windows", True, type=bool))
-        for cb, hint in ((cb_edit, "set_openeditor_hint"), (cb_inline, "set_inline_hint"),
-                         (cb_capture_keep_main, "set_capture_keep_main_hint"),
+        for cb, hint in ((cb_capture_keep_main, "set_capture_keep_main_hint"),
                          (cb_background, "set_start_hidden_hint"), (cb_snap, "set_snap_windows_hint")):
             cb.setToolTip(t(hint))
-        for cb in (cb_copy, cb_save, cb_edit, cb_inline, cb_capture_keep_main, cb_background, cb_snap):
+        for cb in (cb_copy, cb_save, cb_capture_keep_main, cb_background, cb_snap):
             gf.addRow(cb)
         tabs.addTab(g, t("tab_general"))
 
@@ -5931,9 +5893,9 @@ class MainWindow(QtWidgets.QWidget):
         s.setValue("name_tmpl", tmpl.text())
         s.setValue("auto_copy", cb_copy.isChecked())
         s.setValue("auto_save", cb_save.isChecked())
-        s.setValue("open_editor", cb_edit.isChecked())
+        s.remove("open_editor")
         s.setValue("start_hidden", cb_background.isChecked())
-        s.setValue("inline_edit", cb_inline.isChecked())
+        s.remove("inline_edit")
         s.setValue("capture_keep_main", cb_capture_keep_main.isChecked())
         s.setValue("snap_windows", cb_snap.isChecked())
         s.setValue("ocr_lang", lang.currentText())
