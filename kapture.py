@@ -3837,7 +3837,9 @@ class MainWindow(QtWidgets.QWidget):
         w = QtWidgets.QWidget()
         w.setObjectName("vsep")
         w.setAttribute(Qt.WA_StyledBackground, True)
+        # Keep dividers out of the row's horizontal expansion calculation.
         w.setFixedWidth(1)
+        w.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Expanding)
         return w
 
     def _toolbar_group(self, widgets):
@@ -3917,7 +3919,10 @@ class MainWindow(QtWidgets.QWidget):
         card_layout = QtWidgets.QVBoxLayout(card)
         card_layout.setContentsMargins(8, 6, 8, 6)
         card_layout.setSpacing(0)
-        tools = QtWidgets.QHBoxLayout(); tools.setSpacing(3)
+        tools = QtWidgets.QHBoxLayout()
+        # Use the card's padding as the only inset for the icon row.
+        tools.setContentsMargins(0, 0, 0, 0)
+        tools.setSpacing(3)
         card_layout.addLayout(tools)
         self._annotation_row = tools
         self._annotation_widgets = []
@@ -3951,7 +3956,8 @@ class MainWindow(QtWidgets.QWidget):
             button.setObjectName("toolGroup_" + key)
             button.setIcon(line_icon(initial, size=22))
             button.setIconSize(QtCore.QSize(22, 22))
-            button.setFixedSize(40, 36)
+            # Keep the main editor on one 36px icon grid.
+            button.setFixedSize(36, 36)
             button.setCheckable(True)
             button.setAutoRaise(True)
             button.setCursor(Qt.PointingHandCursor)
@@ -3984,7 +3990,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_color.setObjectName("annotationColor")
         self.btn_color.setIcon(swatch_icon(QtGui.QColor(255, 40, 40)))
         self.btn_color.setIconSize(QtCore.QSize(20, 20))
-        self.btn_color.setFixedSize(34, 36)
+        self.btn_color.setFixedSize(36, 36)
         self.btn_color.setAutoRaise(True)
         self.btn_color.setCursor(Qt.PointingHandCursor)
         self.btn_color.clicked.connect(self.pick_color)
@@ -3992,6 +3998,7 @@ class MainWindow(QtWidgets.QWidget):
         self.lwidth = QtWidgets.QSpinBox(); self.lwidth.setRange(1, 30)
         self.lwidth.setObjectName("annotationWidth")
         self.lwidth.setValue(3); self.lwidth.setFixedWidth(48)
+        self.lwidth.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.lwidth.valueChanged.connect(lambda v: self.canvas.set_width(v))
         self._add_annotation_widget(self.lwidth, tools)
         self.btn_undo = self._tbtn("undo", "")
@@ -4045,7 +4052,7 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_ocr = QtWidgets.QToolButton()
         self.btn_ocr.setIcon(line_icon("ocr")); self.btn_ocr.setIconSize(QtCore.QSize(22, 22))
         self.btn_ocr.setObjectName("mainOcrButton")
-        self.btn_ocr.setFixedSize(40, 36)
+        self.btn_ocr.setFixedSize(36, 36)
         self.btn_ocr.setAutoRaise(True); self.btn_ocr.setCursor(Qt.PointingHandCursor)
         self.btn_ocr.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         ocr_menu = QtWidgets.QMenu(self.btn_ocr)
@@ -4078,6 +4085,10 @@ class MainWindow(QtWidgets.QWidget):
             b.hide()
         self._add_annotation_widget(self.btn_ocr, tools)
         self._add_annotation_widget(self.btn_output, tools)
+        # Consume spare width after the actions.  Without a trailing stretch,
+        # Qt distributes the unused width across the row's gaps, which makes
+        # the icon grid drift right on wide editor windows.
+        tools.addStretch(1)
         layout.addWidget(card)
 
         # ---------- Canvas ---------- #
@@ -4892,6 +4903,9 @@ class MainWindow(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(0, lambda captured=img: self._auto_ocr_for(captured))
 
     def _add_history(self, qimg, desc):
+        qimg = QtGui.QImage(qimg)
+        qimg.setText("captured_at", QtCore.QDateTime.currentDateTime().toString(Qt.ISODate))
+        qimg.setText("timestamp_source", "capture")
         history = self._pending_history.get('screenshots', self.history)
         history.insert(0, (qimg, desc))
         history[:] = self._history_store.bounded_entries('screenshots', history)
@@ -5563,8 +5577,14 @@ class MainWindow(QtWidgets.QWidget):
                 230, 140, Qt.KeepAspectRatio, Qt.SmoothTransformation))))
             card.setIconSize(QtCore.QSize(230, 140))
             title = f"截图 {index + 1}" if _LANG == "zh" else f"Screenshot {index + 1}"
-            card.setText(f"{title}\n{qimg.width()} × {qimg.height()}")
+            captured_at = QtCore.QDateTime.fromString(qimg.text("captured_at"), Qt.ISODate)
+            stamp = captured_at.toLocalTime().toString("yyyy-MM-dd HH:mm:ss")
+            card.setText(f"{title} · {qimg.width()} × {qimg.height()}\n{stamp}" if stamp
+                         else f"{title}\n{qimg.width()} × {qimg.height()}")
             card.setToolTip("点击继续编辑" if _LANG == "zh" else "Click to edit")
+            if qimg.text("timestamp_source") == "file":
+                card.setToolTip(card.toolTip() + ("\n旧截图：显示文件保存时间" if _LANG == "zh"
+                                                  else "\nOlder screenshot: file save time"))
             card.setMinimumSize(250, 196)
             card.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             card.clicked.connect(lambda _, q=qimg: (self._load_history(q), dlg.accept()))

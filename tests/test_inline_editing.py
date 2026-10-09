@@ -131,6 +131,10 @@ class InlineEditingTest(unittest.TestCase):
         restored=kapture.MainWindow()
         try:
             self.assertEqual(restored.history[0][1],'Saved capture')
+            stamp = restored.history[0][0].text('captured_at')
+            self.assertTrue(QtCore.QDateTime.fromString(stamp, QtCore.Qt.ISODate).isValid())
+            self.assertEqual(stamp, self.w.history[0][0].text('captured_at'))
+            self.assertEqual(restored.history[0][0].text('timestamp_source'), 'capture')
             np.testing.assert_array_equal(kapture.qimage_to_bgr(restored._clip_images[0]),self.img)
             self.assertTrue(restored._clear_history())
             self.assertTrue(restored._history_writer.flush(3))

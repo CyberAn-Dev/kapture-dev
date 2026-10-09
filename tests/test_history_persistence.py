@@ -75,6 +75,32 @@ class ImageHistoryStoreTest(unittest.TestCase):
         self.assertEqual(restored_clipboard[0].pixelColor(0, 0),
                          QtGui.QColor(0, 1, 0))
 
+    def test_capture_timestamp_survives_writer_and_restart(self):
+        image = _solid_image(QtGui.QColor("blue"))
+        image.setText("captured_at", "2026-10-09T10:23:45+08:00")
+        image.setText("timestamp_source", "capture")
+        writer = HistoryWriter(ImageHistoryStore(self.root))
+        self.assertTrue(writer.submit_screenshots([(image, "capture")]))
+        writer.flush()
+        writer.shutdown()
+        restored = ImageHistoryStore(self.root).load_screenshots()[0][0]
+        self.assertEqual(restored.text("captured_at"), "2026-10-09T10:23:45+08:00")
+        self.assertEqual(restored.text("timestamp_source"), "capture")
+
+    def test_old_screenshot_uses_file_time_without_changing_it_on_save(self):
+        store = ImageHistoryStore(self.root)
+        store.save_screenshots([(_solid_image(QtGui.QColor("red")), "old")])
+        image_path = next((self.root / "screenshots").glob("*.png"))
+        os.utime(image_path, (1700000000, 1700000000))
+        loaded = ImageHistoryStore(self.root).load_screenshots()
+        stamp = loaded[0][0].text("captured_at")
+        self.assertEqual(QtCore.QDateTime.fromString(stamp, QtCore.Qt.ISODate).toSecsSinceEpoch(),
+                         1700000000)
+        self.assertEqual(loaded[0][0].text("timestamp_source"), "file")
+        store.save_screenshots(loaded)
+        self.assertEqual(ImageHistoryStore(self.root).load_screenshots()[0][0].text("captured_at"),
+                         stamp)
+
     def test_load_prunes_legacy_history_to_ten_files(self):
         entries = [(_solid_image(QtGui.QColor(i, 0, 0)), str(i)) for i in range(30)]
         with mock.patch.dict(ImageHistoryStore.LIMITS, {"screenshots": 30}):

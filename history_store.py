@@ -114,6 +114,18 @@ class ImageHistoryStore:
             if image.isNull():
                 self._report(f"Skipped unreadable {collection} image: {record['file']}")
                 continue
+            if collection == "screenshots":
+                captured_at = record.get("captured_at") or image.text("captured_at")
+                source = record.get("timestamp_source") or image.text("timestamp_source")
+                if not captured_at:
+                    try:
+                        captured_at = QtCore.QDateTime.fromSecsSinceEpoch(
+                            int(Path(image_path).stat().st_mtime)).toString(QtCore.Qt.ISODate)
+                        source = "file"
+                    except OSError:
+                        captured_at = ""
+                image.setText("captured_at", str(captured_at))
+                image.setText("timestamp_source", str(source or "capture"))
             loaded.append({
                 "image": image,
                 "file": record["file"],
@@ -161,6 +173,8 @@ class ImageHistoryStore:
                 record = {"file": filename}
                 if collection == "screenshots":
                     record["description"] = str(description)
+                    record["captured_at"] = image.text("captured_at")
+                    record["timestamp_source"] = image.text("timestamp_source")
                 records.append(record)
                 new_cache.append({
                     "image": image,

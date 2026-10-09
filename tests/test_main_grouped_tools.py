@@ -48,6 +48,7 @@ class MainGroupedToolsTest(unittest.TestCase):
             image = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
             image.fill(QtGui.QColor(color))
             images.append(image)
+        images[0].setText("captured_at", "2026-10-09T08:09:10Z")
         self.window.history = [(image, "Region captured: internal detail") for image in images]
 
         def inspect(dialog):
@@ -55,7 +56,10 @@ class MainGroupedToolsTest(unittest.TestCase):
             self.app.processEvents()
             cards = dialog.findChildren(QtWidgets.QToolButton, "historyCard")
             self.assertEqual(len(cards), 3)
-            self.assertEqual(cards[0].text(), "截图 1\n800 × 450")
+            stamp = QtCore.QDateTime.fromString(
+                images[0].text("captured_at"), QtCore.Qt.ISODate
+            ).toLocalTime().toString("yyyy-MM-dd HH:mm:ss")
+            self.assertEqual(cards[0].text(), f"截图 1 · 800 × 450\n{stamp}")
             self.assertEqual(cards[0].y(), cards[1].y())
             self.assertGreater(cards[1].x(), cards[0].x())
             self.assertGreater(cards[2].y(), cards[0].y())
@@ -68,6 +72,25 @@ class MainGroupedToolsTest(unittest.TestCase):
                 mock.patch.object(self.window, "_load_history") as load:
             self.window.show_history()
             load.assert_called_once_with(images[1])
+
+    def test_annotation_icons_keep_one_left_aligned_grid_on_wide_editor(self):
+        self.window.resize(1200, 660)
+        self.app.processEvents()
+        row = self.window._annotation_row
+        first = row.itemAt(0).geometry()
+        self.assertEqual(first.x(), row.geometry().x())
+        icon_names = {
+            "legacyTool_select", "toolGroup_shape", "toolGroup_stroke",
+            "toolGroup_line", "toolGroup_text", "toolGroup_mosaic",
+            "toolGroup_aux", "legacyTool_magnify", "annotationColor",
+            "annotationUndo", "annotationRedo", "annotationClear",
+            "mainOcrButton",
+        }
+        icons = [widget for widget in self.window._annotation_widgets
+                 if widget.objectName() in icon_names]
+        self.assertTrue(icons)
+        self.assertTrue(all(widget.width() == 36 for widget in icons))
+        self.assertGreater(row.itemAt(17).geometry().width(), 0)
 
     def test_tool_menus_choose_one_canvas_tool_and_keep_group_highlights_exclusive(self):
         groups = getattr(self.window, "_main_tool_groups", {})
