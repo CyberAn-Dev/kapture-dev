@@ -24,3 +24,7 @@ __pycache__/
 build/
 .venv
 dist/
+
+# 开发侧发版工具,不随正式仓库发布
+make_release.sh
+build_deb.sh
