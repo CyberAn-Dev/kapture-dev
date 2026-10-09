@@ -28,3 +28,6 @@ dist/
 # 开发侧发版工具,不随正式仓库发布
 make_release.sh
 build_deb.sh
+
+# 本地测试套件,不随正式仓库发布
+tests/
