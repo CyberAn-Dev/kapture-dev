@@ -109,9 +109,37 @@ def system_prefers_dark():
 _LANG = "zh"
 
 
+class NativeTextTranslator(QtCore.QTranslator):
+    """Translate Qt's built-in edit actions using the selected app language."""
+    labels = {
+        'Undo':'撤销','Redo':'重做','Cut':'剪切','Copy':'复制','Paste':'粘贴',
+        'Delete':'删除','Select All':'全选','Select all':'全选',
+        'Clear':'清空','Step up':'增加','Step down':'减少',
+        'OK':'确定','Cancel':'取消','Close':'关闭','Save':'保存','Open':'打开',
+        'Select Color':'选择颜色','Basic colors':'基本颜色','Custom colors':'自定义颜色',
+        'Add to Custom Colors':'添加到自定义颜色','Pick Screen Color':'选取屏幕颜色',
+        'Hue:':'色相：','Sat:':'饱和度：','Val:':'明度：','Red:':'红：','Green:':'绿：',
+        'Blue:':'蓝：','Alpha channel:':'透明度：','HTML:':'颜色值：',
+    }
+
+    def isEmpty(self):
+        return False
+
+    def translate(self, context, source, disambiguation=None, n=-1):
+        if _LANG != 'zh':
+            return None
+        label,separator,shortcut=source.partition('\t')
+        translated=self.labels.get(label.replace('&',''))
+        return translated+separator+shortcut if translated is not None else None
+
+
 def set_lang(code):
     global _LANG
     _LANG = code if code in ("zh", "en") else "zh"
+    app=QtWidgets.QApplication.instance()
+    if app is not None and not hasattr(app,'_kapture_translator'):
+        app._kapture_translator=NativeTextTranslator(app)
+        app.installTranslator(app._kapture_translator)
 
 
 def t(key):
@@ -351,10 +379,9 @@ def line_icon(name, color="#d2d2da", size=22):
         L(12, 5, 12, 13); L(12, 17, 12, 19); Ell(10, 13, 4, 4)
         L(19, 5, 19, 9); L(19, 13, 19, 19); Ell(17, 9, 4, 4)
     elif name == "editor":
-        Rr(3.5, 4, 17, 16, 2)
-        L(7, 8, 14, 8); L(7, 11.5, 14, 11.5)
-        L(7, 15, 11, 15); L(16.5, 14.5, 20, 18)
-        L(20, 14.5, 16.5, 18)
+        Rr(4,4,16,16,2.5)
+        L(4,8,20,8)
+        L(7,14,17,14);L(14,11,17,14);L(14,17,17,14)
     elif name == "ocr":
         for cx, cy, dx, dy in [(4,4,1,1),(20,4,-1,1),(4,20,1,-1),(20,20,-1,-1)]:
             L(cx,cy,cx+3*dx,cy); L(cx,cy,cx,cy+3*dy)
@@ -1345,8 +1372,12 @@ class RegionSelector(QtWidgets.QWidget):
         p.drawPixmap(0, 0, self.bg_pix)
         # Semi-transparent dimming
         p.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 90))
-        hint = ("Drag to select a region, Esc to cancel" if self.mode == "region"
-                else "Move to a pixel, click to pick color, Esc to cancel")
+        if _LANG == 'zh':
+            hint=('拖动选择区域，Esc 取消' if self.mode=='region'
+                  else '移动到目标像素，点击取色，Esc 取消')
+        else:
+            hint=('Drag to select a region, Esc to cancel' if self.mode=='region'
+                  else 'Move to a pixel, click to pick color, Esc to cancel')
         p.setPen(QtGui.QColor(255, 255, 255, 220))
         p.drawText(20, 30, getattr(self,"hint_text",hint))
 
@@ -1711,7 +1742,8 @@ class CanvasTextInput(QtWidgets.QLineEdit):
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
-        self.parent()._finish_text()
+        if event.reason()!=Qt.PopupFocusReason:
+            self.parent()._finish_text()
 
 
 class AnnotateCanvas(QtWidgets.QWidget):
@@ -2001,7 +2033,8 @@ class AnnotateCanvas(QtWidgets.QWidget):
         if self.base is None:
             p.fillRect(self.rect(), QtGui.QColor(self.empty_background))
             p.setPen(QtGui.QColor(self.empty_text))
-            p.drawText(self.rect(), Qt.AlignCenter, "No screenshot yet. Use the buttons above to start.")
+            p.drawText(self.rect(), Qt.AlignCenter, "No screenshot yet. Use the buttons above to start."
+                       if _LANG == "en" else "尚无截图，请使用上方按钮开始截图。")
             return
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         p.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
@@ -3789,7 +3822,7 @@ class MainWindow(QtWidgets.QWidget):
             self.status.setText(self._history_store.errors[-1])
 
     def _tbtn(self, icon, tip, checkable=False):
-        b = QtWidgets.QToolButton()
+        b = QtWidgets.QToolButton(self)
         b.setIcon(line_icon(icon,size=24))
         b.setIconSize(QtCore.QSize(24, 24))
         b.setFixedSize(36, 36)
@@ -3816,6 +3849,27 @@ class MainWindow(QtWidgets.QWidget):
         for widget in widgets:
             row.addWidget(widget)
         return group
+
+    def _add_annotation_widget(self, widget, layout):
+        widget.setProperty("annotationToolbarItem", True)
+        layout.addWidget(widget)
+        widget.show()
+        self._annotation_widgets.append(widget)
+
+    @staticmethod
+    def _psm_layout_labels(language=None):
+        language = language or _LANG
+        if language == "zh":
+            return ("文本块（psm 6）", "自动（psm 3）",
+                    "单列（psm 4）", "单行（psm 7）")
+        return ("Block of text (psm 6)", "Auto (psm 3)",
+                "Single column (psm 4)", "Single line (psm 7)")
+
+    @classmethod
+    def _localize_psm_combo(cls, combo, language=None):
+        for index, label in enumerate(cls._psm_layout_labels(language)):
+            if index < combo.count():
+                combo.setItemText(index, label)
 
     def _build_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -3862,56 +3916,136 @@ class MainWindow(QtWidgets.QWidget):
         card = QtWidgets.QFrame(); card.setObjectName("card")
         card_layout = QtWidgets.QVBoxLayout(card)
         card_layout.setContentsMargins(8, 6, 8, 6)
-        card_layout.setSpacing(5)
+        card_layout.setSpacing(0)
         tools = QtWidgets.QHBoxLayout(); tools.setSpacing(3)
         card_layout.addLayout(tools)
+        self._annotation_row = tools
+        self._annotation_widgets = []
+        self._main_tool_groups = {}
+        self._main_tool_actions = {}
+        self._main_tool_current = {}
         self.tool_group = QtWidgets.QButtonGroup(self)
+        self.tool_group.setExclusive(True)
         self._tool_btns = {}
         for name in ["picktext", "select", "rect", "ellipse", "arrow", "line", "pen",
                      "text", "number", "highlight", "blur", "magnify", "crop"]:
             b = self._tbtn(name, "", checkable=True)
-            b.clicked.connect(lambda _, n=name: self.canvas.set_tool(n))
-            self.tool_group.addButton(b); tools.addWidget(b)
+            b.setObjectName("legacyTool_" + name)
+            b.hide()
+            b.clicked.connect(lambda _, n=name: self._set_main_tool(n))
+            self.tool_group.addButton(b)
             self._tool_btns[name] = b
-            if name == "picktext":
-                b.setChecked(True)
+
+        grouped_tools = (
+            ("shape", "rect", ("rect", "ellipse")),
+            ("stroke", "pen", ("pen", "highlight")),
+            ("line", "arrow", ("arrow", "line")),
+            ("text", "text", ("text", "number")),
+            ("mosaic", "blur", ("blur", "gaussian")),
+            ("aux", "picktext", ("picktext", "crop")),
+        )
+        self.btn_select = self._tool_btns["select"]
+        self._add_annotation_widget(self.btn_select, tools)
+        for key, initial, names in grouped_tools:
+            button = QtWidgets.QToolButton(self)
+            button.setObjectName("toolGroup_" + key)
+            button.setIcon(line_icon(initial, size=22))
+            button.setIconSize(QtCore.QSize(22, 22))
+            button.setFixedSize(40, 36)
+            button.setCheckable(True)
+            button.setAutoRaise(True)
+            button.setCursor(Qt.PointingHandCursor)
+            menu = QtWidgets.QMenu(self)
+            menu.setObjectName("toolMenu_" + key)
+            action_group = QtWidgets.QActionGroup(menu)
+            action_group.setExclusive(True)
+            actions = {}
+            for name in names:
+                label_key = "a_gaussian_blur" if name == "gaussian" else "a_" + name
+                action = menu.addAction(line_icon(name), t(label_key))
+                action.setObjectName("tool:" + name)
+                action.setCheckable(True)
+                action_group.addAction(action)
+                action.triggered.connect(
+                    lambda _checked=False, tool=name: self._set_main_tool(tool))
+                actions[name] = action
+            button.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+            button.setMenu(menu)
+            button.clicked.connect(
+                lambda _checked=False, group_key=key, fallback=initial:
+                self._set_main_tool(self._main_tool_current.get(group_key, fallback)))
+            self._main_tool_groups[key] = (button, menu, tuple(names))
+            self._main_tool_actions[key] = actions
+            self._add_annotation_widget(button, tools)
+
+        self.btn_magnify = self._tool_btns["magnify"]
+        self._add_annotation_widget(self.btn_magnify, tools)
         self.btn_color = QtWidgets.QToolButton()
+        self.btn_color.setObjectName("annotationColor")
         self.btn_color.setIcon(swatch_icon(QtGui.QColor(255, 40, 40)))
         self.btn_color.setIconSize(QtCore.QSize(20, 20))
-        self.btn_color.setFixedSize(36, 36)
+        self.btn_color.setFixedSize(34, 36)
         self.btn_color.setAutoRaise(True)
         self.btn_color.setCursor(Qt.PointingHandCursor)
         self.btn_color.clicked.connect(self.pick_color)
-        tools.addWidget(self._vsep())
-        tools.addWidget(self.btn_color)
+        self._add_annotation_widget(self.btn_color, tools)
         self.lwidth = QtWidgets.QSpinBox(); self.lwidth.setRange(1, 30)
-        self.lwidth.setValue(3); self.lwidth.setFixedWidth(50)
+        self.lwidth.setObjectName("annotationWidth")
+        self.lwidth.setValue(3); self.lwidth.setFixedWidth(48)
         self.lwidth.valueChanged.connect(lambda v: self.canvas.set_width(v))
-        tools.addWidget(self.lwidth)
+        self._add_annotation_widget(self.lwidth, tools)
         self.btn_undo = self._tbtn("undo", "")
+        self.btn_undo.setObjectName("annotationUndo")
         self.btn_undo.clicked.connect(lambda: self.canvas.undo())
         self.btn_clear = self._tbtn("clear", "")
+        self.btn_clear.setObjectName("annotationClear")
         self.btn_clear.clicked.connect(lambda: self.canvas.clear_items())
-        tools.addStretch(1)
-        tools.addWidget(self._vsep())
+        self._annotation_separator = self._vsep()
+        self.tools_redo_separator = self._vsep()
+        tools.addWidget(self._annotation_separator)
+        self._add_annotation_widget(self.btn_undo, tools)
         self.btn_redo = self._tbtn('redo',t('a_redo'))
+        self.btn_redo.setObjectName("annotationRedo")
         self.btn_redo.clicked.connect(self._redo_current_context)
-        tools.addWidget(self.btn_undo); tools.addWidget(self.btn_redo); tools.addWidget(self.btn_clear)
+        self._add_annotation_widget(self.btn_redo, tools)
+        self._add_annotation_widget(self.btn_clear, tools)
 
-        divider = QtWidgets.QFrame()
-        divider.setObjectName("toolbarDivider")
-        divider.setFixedHeight(1)
-        card_layout.addWidget(divider)
-        exports = QtWidgets.QHBoxLayout(); exports.setSpacing(3)
-        self._output_label = QtWidgets.QLabel(t("lab_output"))
+        tools.addWidget(self.tools_redo_separator)
+        self.btn_output = QtWidgets.QToolButton(self)
+        self.btn_output.setObjectName("outputMenuButton")
+        self.btn_output.setIcon(line_icon("save", size=22))
+        self.btn_output.setIconSize(QtCore.QSize(22, 22))
+        self.btn_output.setText(t("lab_output"))
+        self.btn_output.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_output.setFixedHeight(36)
+        self.btn_output.setAutoRaise(True)
+        self.btn_output.setCursor(Qt.PointingHandCursor)
+        self.btn_output.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self._output_menu = QtWidgets.QMenu(self.btn_output)
+        self._output_actions = {}
+        for key, icon, label_key, callback in (
+                ("ocr", "ocr", "e_ocr", lambda: self.run_ocr()),
+                ("copy", "copy", "e_copy", lambda: self.copy_image()),
+                ("pin", "pin", "e_pin", lambda: self.pin_image()),
+                ("save", "save", "e_save", lambda: self.save_image()),
+                ("beautify", "beautify", "e_beautify", lambda: self.beautify_export())):
+            action = self._output_menu.addAction(line_icon(icon), t(label_key))
+            action.setObjectName("output:" + key)
+            action.triggered.connect(callback)
+            self._output_actions[key] = action
+        self.btn_output.setMenu(self._output_menu)
+
+        # Legacy references remain available for integrations and tests; their
+        # commands are exposed in the output menu instead of a separate toolbar.
+        self._output_label = QtWidgets.QLabel(t("lab_output"), self)
         self._output_label.setObjectName("dim")
-        exports.addWidget(self._output_label)
-        card_layout.addLayout(exports)
+        self._output_label.hide()
 
         # OCR: main button runs recognition; dropdown arrow adjusts language/layout/enhancement
         self.btn_ocr = QtWidgets.QToolButton()
         self.btn_ocr.setIcon(line_icon("ocr")); self.btn_ocr.setIconSize(QtCore.QSize(22, 22))
-        self.btn_ocr.setFixedHeight(36)
+        self.btn_ocr.setObjectName("mainOcrButton")
+        self.btn_ocr.setFixedSize(40, 36)
         self.btn_ocr.setAutoRaise(True); self.btn_ocr.setCursor(Qt.PointingHandCursor)
         self.btn_ocr.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         ocr_menu = QtWidgets.QMenu(self.btn_ocr)
@@ -3919,8 +4053,8 @@ class MainWindow(QtWidgets.QWidget):
         self.lang = QtWidgets.QComboBox()
         self.lang.addItems(["chi_sim+eng", "chi_sim", "chi_tra+eng", "eng"])
         self.psm = QtWidgets.QComboBox()
-        self.psm.addItem("Block of text (psm 6)", 6); self.psm.addItem("Auto (psm 3)", 3)
-        self.psm.addItem("Single column (psm 4)", 4); self.psm.addItem("Single line (psm 7)", 7)
+        for label, value in zip(self._psm_layout_labels(), (6, 3, 4, 7)):
+            self.psm.addItem(label, value)
         self.enhance = QtWidgets.QCheckBox()
         # Apply the OCR defaults saved in settings
         self.lang.setCurrentText(self.settings.value("ocr_lang", "chi_sim+eng"))
@@ -3940,14 +4074,15 @@ class MainWindow(QtWidgets.QWidget):
         self.btn_pin = self._tbtn("pin", "")
         self.btn_beautify = self._tbtn("beautify", "")
         self.btn_save = self._tbtn("save", "")
-        for b in (self.btn_ocr, self.btn_copy, self.btn_pin,
-                  self.btn_beautify, self.btn_save):
-            exports.addWidget(b)
-        exports.addStretch(1)
+        for b in (self.btn_copy, self.btn_pin, self.btn_beautify, self.btn_save):
+            b.hide()
+        self._add_annotation_widget(self.btn_ocr, tools)
+        self._add_annotation_widget(self.btn_output, tools)
         layout.addWidget(card)
 
         # ---------- Canvas ---------- #
         self.canvas = AnnotateCanvas()
+        self._sync_main_tool(self.canvas.tool)
         self.canvas.cropRequested.connect(self._do_crop)
         self.canvas.textSelected.connect(self._on_text_selected)
         self.canvas.picktextNeedsWords.connect(self._ensure_word_boxes)
@@ -3956,7 +4091,7 @@ class MainWindow(QtWidgets.QWidget):
         self.scroll.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         layout.addWidget(self.scroll, 3)
 
-        # ---------- OCR text result: fixed header above the scrolling text ---------- #
+        # ---------- OCR result with fixed floating actions ---------- #
         self._ocr_panel=QtWidgets.QFrame()
         self._ocr_panel.setObjectName('ocrPanel')
         ocr_layout=QtWidgets.QVBoxLayout(self._ocr_panel)
@@ -3965,17 +4100,17 @@ class MainWindow(QtWidgets.QWidget):
         self._ocr_btns.setObjectName('ocrActions')
         self._ocr_btns.setAttribute(Qt.WA_StyledBackground,True)
         br=QtWidgets.QHBoxLayout(self._ocr_btns)
-        br.setContentsMargins(10,7,12,5);br.setSpacing(6)
-        br.addStretch(1)
+        br.setContentsMargins(4,3,4,3);br.setSpacing(6)
         self.btn_ocr_all=QtWidgets.QPushButton()
         self.btn_copy_all=QtWidgets.QPushButton()
         for button in (self.btn_ocr_all,self.btn_copy_all):
             button.setFixedHeight(28);button.setCursor(Qt.PointingHandCursor)
             br.addWidget(button)
-        ocr_layout.addWidget(self._ocr_btns)
         self.text=QtWidgets.QPlainTextEdit()
         self.text.setObjectName('ocrText')
         ocr_layout.addWidget(self.text,1)
+        self._ocr_panel.installEventFilter(self)
+        self.text.viewport().installEventFilter(self)
         layout.addWidget(self._ocr_panel,2)
 
         self.status = QtWidgets.QLabel()
@@ -4013,6 +4148,42 @@ class MainWindow(QtWidgets.QWidget):
         self._delete_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence('Delete'),self.canvas)
         self._delete_shortcut.setContext(Qt.WidgetShortcut)
         self._delete_shortcut.activated.connect(self.canvas.delete_selected)
+
+    def _set_main_tool(self, name):
+        if name not in self._tool_btns and name != "gaussian":
+            return
+        if name == "gaussian":
+            self.canvas.blur_style = "gaussian"
+            canvas_tool = "blur"
+        else:
+            if name == "blur":
+                self.canvas.blur_style = "pixelate"
+            canvas_tool = name
+        self.canvas.set_tool(canvas_tool)
+        self._tool_btns["blur" if name == "gaussian" else name].setChecked(True)
+        self._sync_main_tool(name)
+
+    def _sync_main_tool(self, name):
+        if name not in self._tool_btns and name != "gaussian":
+            return
+        source_tool = "blur" if name == "gaussian" else name
+        for tool_name, button in self._tool_btns.items():
+            button.setChecked(tool_name == source_tool)
+        for group_key, (button, _menu, names) in self._main_tool_groups.items():
+            active = name in names
+            button.setChecked(active)
+            if active:
+                self._main_tool_current[group_key] = name
+            for tool_name, action in self._main_tool_actions[group_key].items():
+                action.setChecked(tool_name == name)
+        self._refresh_theme_icons()
+
+    def _update_main_tool_labels(self):
+        for key, (button, _menu, _names) in self._main_tool_groups.items():
+            current = self._main_tool_current.get(key)
+            if current is not None:
+                button.setToolTip(t("a_gaussian_blur" if current == "gaussian"
+                                    else "a_" + current))
 
     def _undo_current_context(self):
         focus = QtWidgets.QApplication.focusWidget()
@@ -4068,13 +4239,22 @@ class MainWindow(QtWidgets.QWidget):
             self.btn_undo: "a_undo", self.btn_redo: "a_redo", self.btn_clear: "a_clear",
             self.btn_ocr: "e_ocr", self.btn_copy: "e_copy", self.btn_pin: "e_pin",
             self.btn_beautify: "e_beautify", self.btn_save: "e_save",
+            self.btn_output: "lab_output",
         }
         for w, key in tips.items():
             w.setToolTip(t(key))
+        self.btn_output.setText(t("lab_output"))
         self.btn_ocr_all.setText(t("t_ocr_all"))
         self.btn_copy_all.setText(t("t_copy_all"))
         for name, b in self._tool_btns.items():
             b.setToolTip(t("a_" + name))
+        self._update_main_tool_labels()
+        for group_key, actions in self._main_tool_actions.items():
+            for name, action in actions.items():
+                action.setText(t("a_gaussian_blur" if name == "gaussian" else "a_" + name))
+        for name, action in self._output_actions.items():
+            action.setText(t({"ocr": "e_ocr", "copy": "e_copy", "pin": "e_pin",
+                              "save": "e_save", "beautify": "e_beautify"}[name]))
         self._lab_delay.setText(t("lab_delay"))
         self._lab_speed.setText(t("lab_speed"))
         self._scroll_down_action.setText(t("scroll_down"))
@@ -4084,6 +4264,7 @@ class MainWindow(QtWidgets.QWidget):
         self._ocr_lab_lang.setText(t("ocr_lang"))
         self._ocr_lab_layout.setText(t("ocr_layout"))
         self.enhance.setText(t("ocr_enhance"))
+        self._localize_psm_combo(self.psm)
         self._refresh_theme_icons()                  # OCR icon follows the language: 字 / OCR
         self.text.setPlaceholderText(
             "OCR result will appear here…" if _LANG == "en" else "OCR 识别结果会显示在这里……")
@@ -4107,7 +4288,8 @@ class MainWindow(QtWidgets.QWidget):
                 (self.btn_settings, "settings"), (self.btn_undo, "undo"),
                 (self.btn_redo,"redo"), (self.btn_clear, "clear"), (self.btn_ocr, "ocr"),
                 (self.btn_copy, "copy"), (self.btn_pin, "pin"),
-                (self.btn_beautify, "beautify"), (self.btn_save, "save")):
+                (self.btn_beautify, "beautify"), (self.btn_save, "save"),
+                (self.btn_output, "save")):
             icon = line_icon(name, colors["on_accent"] if button is self.btn_single
                              else colors["icon"],size=button.iconSize().width())
             if button.isCheckable():
@@ -4119,6 +4301,19 @@ class MainWindow(QtWidgets.QWidget):
             icon.addPixmap(line_icon(name, colors["on_accent"],size=button.iconSize().width()).pixmap(button.iconSize()),
                            QtGui.QIcon.Normal, QtGui.QIcon.On)
             button.setIcon(icon)
+        for key, (button, _menu, names) in self._main_tool_groups.items():
+            name = self._main_tool_current.get(key, names[0])
+            icon = line_icon(name, colors["icon"], size=button.iconSize().width())
+            icon.addPixmap(line_icon(name, colors["on_accent"],
+                                     size=button.iconSize().width()).pixmap(button.iconSize()),
+                           QtGui.QIcon.Normal, QtGui.QIcon.On)
+            button.setIcon(icon)
+            for action_name, action in self._main_tool_actions[key].items():
+                action.setIcon(line_icon(action_name, colors["icon"], size=22))
+        output_icons = {"ocr": "ocr", "copy": "copy", "pin": "pin",
+                        "save": "save", "beautify": "beautify"}
+        for name, action in self._output_actions.items():
+            action.setIcon(line_icon(output_icons[name], colors["icon"], size=22))
 
     def _apply_style(self, theme=None, accent=None):
         """Apply one complete palette to the editor and its child dialogs."""
@@ -4901,12 +5096,22 @@ class MainWindow(QtWidgets.QWidget):
     def eventFilter(self, obj, ev):
         if obj is self.text and ev.type() == QtCore.QEvent.Resize:
             self._place_toast()
+        if obj in (self._ocr_panel,self.text.viewport()) and ev.type()==QtCore.QEvent.Resize:
+            self._place_ocr_btns()
         return super().eventFilter(obj, ev)
+
+    def _place_ocr_btns(self):
+        self._ocr_btns.adjustSize()
+        viewport=self.text.viewport()
+        corner=viewport.mapTo(self._ocr_panel,QtCore.QPoint(viewport.width(),0))
+        self._ocr_btns.move(max(2,corner.x()-self._ocr_btns.width()-4),corner.y()+3)
+        self._ocr_btns.raise_()
 
     def _update_ocr_btns(self):
         """Show 全部识别/全部复制 only while the OCR box actually holds text."""
         has = bool(self.text.toPlainText().strip())
         self._ocr_btns.setVisible(has)
+        if has:self._place_ocr_btns()
 
     def _do_crop(self, rectf):
         self.canvas.crop_image(rectf)
@@ -5147,9 +5352,8 @@ class MainWindow(QtWidgets.QWidget):
         lang = QtWidgets.QComboBox(); lang.addItems(["chi_sim+eng", "chi_sim", "chi_tra+eng", "eng"])
         lang.setCurrentText(s.value("ocr_lang", "chi_sim+eng"))
         psm = QtWidgets.QComboBox()
-        for txt, v in [("Block of text (psm 6)", 6), ("Auto (psm 3)", 3),
-                       ("Single column (psm 4)", 4), ("Single line (psm 7)", 7)]:
-            psm.addItem(txt, v)
+        for label, value in zip(self._psm_layout_labels(), (6, 3, 4, 7)):
+            psm.addItem(label, value)
         pi = psm.findData(int(s.value("ocr_psm", 6, type=int)))
         if pi >= 0:
             psm.setCurrentIndex(pi)
@@ -5198,6 +5402,8 @@ class MainWindow(QtWidgets.QWidget):
         ui_lang = QtWidgets.QComboBox()
         ui_lang.addItem("中文", "zh"); ui_lang.addItem("English", "en")
         ui_lang.setCurrentIndex(0 if _LANG == "zh" else 1)
+        ui_lang.currentIndexChanged.connect(
+            lambda _index: self._localize_psm_combo(psm, ui_lang.currentData()))
         uf.addRow(t("set_uilang"), ui_lang)
         tabs.addTab(u, t("tab_ui"))
 

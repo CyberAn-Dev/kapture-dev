@@ -37,11 +37,10 @@ class EditorControlsTest(unittest.TestCase):
         self.window.close()
         self.desktop_patch.stop()
 
-    def test_output_buttons_start_beside_output_label(self):
-        label_right = (self.window._output_label.mapTo(self.window, QtCore.QPoint()).x()
-                       + self.window._output_label.width())
-        ocr_left = self.window.btn_ocr.mapTo(self.window, QtCore.QPoint()).x()
-        self.assertLessEqual(ocr_left - label_right, 20)
+    def test_output_dropdown_replaces_the_separate_output_row(self):
+        self.assertTrue(self.window._output_label.isHidden())
+        self.assertFalse(self.window.btn_output.isHidden())
+        self.assertIs(self.window.btn_output.menu(), self.window._output_menu)
 
     def test_ctrl_z_undoes_annotation_from_toolbar_focus(self):
         self.window.canvas.items.append(object())

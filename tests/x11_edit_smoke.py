@@ -135,6 +135,17 @@ def run():
             QtTest.QTest.qWait(80)
             assert window.btn_copy_all.mapToGlobal(QtCore.QPoint())==before
             window.grab().save('/tmp/kapture-main-x11.png')
+            menu=window.text.createStandardContextMenu()
+            labels=[action.text() for action in menu.actions() if not action.isSeparator()]
+            assert any(label.startswith('复制') and 'Ctrl+C' in label for label in labels)
+            assert not any('Copy' in label for label in labels)
+            menu.deleteLater()
+            window._output_menu.popup(window.btn_output.mapToGlobal(QtCore.QPoint(0,window.btn_output.height())))
+            QtTest.QTest.qWait(80)
+            assert window._output_menu.isVisible()
+            window._output_menu.grab().save('/tmp/kapture-output-menu.png')
+            window._output_menu.hide()
+
             assert len(window.canvas.items)==2
             window.canvas.undo();assert len(window.canvas.items)==1
             window.canvas.redo();assert len(window.canvas.items)==2

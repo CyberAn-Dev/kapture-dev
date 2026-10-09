@@ -26,7 +26,7 @@
 
 ## Editor controls and automatic OCR
 
-- OCR actions use a fixed header above the text viewport, aligned right inside the OCR module. Header and buttons inherit the editor palette; the text and scrollbars occupy their own lower area.
+- OCR actions float at the top-right inside the OCR module, outside the scrolling text viewport and outside the layout. They inherit the editor palette and leave the full module height available to text; their position follows viewport geometry to avoid scrollbars.
 
 - Place output actions immediately after their label, keeping the row left aligned.
 - Route Ctrl+Z to annotation undo when the editor controls have focus and to QPlainTextEdit undo when the OCR result box has focus.
@@ -55,7 +55,7 @@
 - Its OCR runs on a dedicated `OCRWorker` (`automatic=True` for the 20 s bound) instead of `run_ocr()`, so the editor's `_ocr_serial`/pending/toast state stays untouched; feedback is a standalone `_flash_note` (a `_make_hint`-style bypass-WM toast) because the editor's `_toast` lives inside the OCR text box and would be invisible. Not in `SHORTCUT_ACTIONS` for now — toolbar-only.
 - 全部识别 re-runs `run_ocr(copy_result=False)`; 全部复制 copies the text box, leaving the clipboard untouched if empty. Keep these actions in the OCR module.
 - picktext keeps the I-beam cursor only while the pointer is over a recognized word box (checked in `mouseMoveEvent` via `_word_at`); the default cursor is the arrow, and word-box-free images never show an I-beam. Rationale: a permanent I-beam suggested selectable text everywhere there is none.
-- The OCR header is a sibling of QPlainTextEdit, never a viewport child, so scrolling cannot move its buttons. Preserve visibility only for non-empty text. Apply Vitesse Dark through the user theme setting, without hard-coding a separate OCR palette.
+- The OCR action container is a sibling of QPlainTextEdit, never a viewport child or a layout row, so scrolling cannot move its buttons or consume a whole text line. Preserve visibility only for non-empty text. Apply Vitesse Dark through the user theme setting, without hard-coding a separate OCR palette.
 - Scrolling-capture feedback is a shared `ScrollHud` (live thumbnail + height + stop, placed outside the region) plus a red region frame. Both modes use it; `ManualBar` is deleted. Auto mode streams previews through a new `CaptureWorker.frame` signal, downscaled to 1200 px before emitting (queued-signal cost stays bounded for 40 000 px captures); the HUD's stop calls `worker.abort()`, reusing the worker's existing partial-result emit path instead of a new one.
 - The region frame is four thin always-on-top strips hugging the region's outer edge, NOT a full-desktop translucent overlay: `WA_TransparentForMouseEvents` is Qt-application-local and does not make an X11 top-level window click-through, so a full-desktop overlay swallowed pynput's wheel events and the auto scrolling capture could no longer scroll (self-inflicted regression, fixed by construction — the strips never cover the region and are mouse-transparent).
 - Automatic and manual scrolling share `CaptureWorker` and global-canvas matching. Manual grabbing, matching, stitching, and preview downsampling run off the GUI thread. Both directions extend only outside the existing canvas; automatic capture defaults downward and exposes upward capture in its toolbar dropdown.
@@ -130,3 +130,7 @@
 - Full-editor access is a first-class toolbar action on capture and pins, with the settings-menu entry retained. Check states are derived from the current tool, never from dropdown open/close state. Main-window icons render at their displayed size and use the same theme-aware line artwork.
 - Recording always writes MP4; the existing `record_gif` preference adds a GIF rather than replacing MP4. Reuse the external red frame and placement logic so border/control pixels stay outside the recording. A global Esc stops recording even when a full-screen selection leaves no room for the bar.
 - QProcess finalization and GIF conversion stay on the event loop without blocking waits after Stop. MP4 finalization uses an indeterminate activity bar; GIF progress uses ffmpeg output timestamps and reaches 100 only on successful process/file validation. Failed GIF export reports the error while retaining the completed MP4. Normal application Quit defers until recording/export completes. X11 input probing is bounded to permit short clips.
+
+- Native text-edit context menus follow the selected app language through Qt translation, preserving built-in action behavior, disabled states, and keyboard shortcuts. Avoid an external translation-package dependency for these common commands; unknown strings fall through to Qt normally.
+
+- Main-editor annotation categories use dropdowns like capture-time editing; maintain exactly one active tool and update menu labels/icons when language/theme changes. Place labeled Output in the same row, retaining OCR/copy/pin/save/beautify commands. Save keeps original annotated dimensions; Beautify is a presentation export with decorative framing.

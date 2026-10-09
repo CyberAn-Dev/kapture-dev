@@ -63,12 +63,15 @@ class OcrButtonVisibilityTest(unittest.TestCase):
         bar.setValue(bar.maximum());self.app.processEvents()
         self.assertEqual(button.mapToGlobal(QtCore.QPoint()),initial)
         text_top=self.window.text.mapToGlobal(QtCore.QPoint()).y()
-        self.assertLessEqual(initial.y()+button.height(),text_top)
+        self.assertGreaterEqual(initial.y(),text_top)
+        self.assertLess(initial.y()-text_top,24)
+        self.assertEqual(self.window._ocr_panel.layout().indexOf(self.window._ocr_btns),-1)
+        self.assertGreaterEqual(self.window.text.height(),self.window._ocr_panel.height()-4)
         bar_rect=QtCore.QRect(bar.mapToGlobal(QtCore.QPoint()),bar.size())
         button_rect=QtCore.QRect(initial,button.size())
         self.assertFalse(button_rect.intersects(bar_rect))
         panel=self.window._ocr_panel
-        self.assertLessEqual(panel.mapToGlobal(QtCore.QPoint(panel.width(),0)).x()-button_rect.right(),20)
+        self.assertLessEqual(panel.mapToGlobal(QtCore.QPoint(panel.width(),0)).x()-button_rect.right(),32)
 
 
 class ScrollHudTest(unittest.TestCase):
