@@ -132,7 +132,7 @@ class ShortcutTest(unittest.TestCase):
             dialog.findChildren(QtWidgets.QKeySequenceEdit)[0].setKeySequence(
                 QtGui.QKeySequence("Ctrl+Alt+K"))
             background = next(box for box in dialog.findChildren(QtWidgets.QCheckBox)
-                              if "后台" in box.text())
+                              if box.text() == kapture.t("set_start_hidden"))
             background.setChecked(True)
             dialog.close()
             return QtWidgets.QDialog.Accepted

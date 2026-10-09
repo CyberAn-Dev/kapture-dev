@@ -163,9 +163,13 @@ TR = {
     "pin_select_text": {"zh":"选取文字", "en":"Select text"},
     "finish_edit": {"zh":"完成标注", "en":"Finish editing"},
     "save_failed": {"zh":"保存失败，请选择可写入的路径", "en":"Save failed; choose a writable path"},
-    "set_capture_keep_main": {"zh": "截图时保留主界面显示（可截取本工具）",
-                              "en": "Keep the main window visible during screenshots"},
-    "set_inline": {"zh":"截图后原位编辑（未选择直接打开编辑器时）", "en":"Edit in place after capture (unless opening the editor)"},
+    "set_capture_keep_main": {"zh": "截图时保留主界面",
+                              "en": "Keep main window during capture"},
+    "set_capture_keep_main_hint": {"zh": "保留 Kapture 主界面，可将本工具截入截图。",
+                                    "en": "Keep Kapture visible so it can be included in a screenshot."},
+    "set_inline": {"zh":"截图后原位编辑", "en":"Edit capture in place"},
+    "set_inline_hint": {"zh":"启用“截图后打开编辑器”时，优先打开编辑器。",
+                         "en":"Opening the editor takes precedence over in-place editing."},
     "clear_history": {"zh":"清空截图与剪贴板图片历史", "en":"Clear screenshot and clipboard image history"},
 
     "app_title": {"zh": "Kapture", "en": "Kapture"},
@@ -232,12 +236,18 @@ TR = {
     "set_tmpl": {"zh": "文件名模板", "en": "Filename template"},
     "set_autocopy": {"zh": "截图后自动复制到剪贴板", "en": "Auto-copy to clipboard after capture"},
     "set_autosave": {"zh": "截图后自动保存到目录", "en": "Auto-save to folder after capture"},
-    "set_openeditor": {"zh": "截图后直接打开编辑器(否则只显示缩略图)",
-                       "en": "Open editor after capture (otherwise thumbnail only)"},
-    "set_start_hidden": {"zh": "启动时在后台运行（通过托盘或快捷键唤起）",
-                         "en": "Start in background (open from tray or shortcut)"},
-    "set_snap_windows": {"zh": "截图时吸附窗口（悬停高亮并单击选中整个窗口、拖拽边缘对齐窗口边界）",
-                         "en": "Snap to windows while selecting (hover highlights a window, click selects it; edges align to window borders)"},
+    "set_openeditor": {"zh": "截图后打开编辑器",
+                       "en": "Open editor after capture"},
+    "set_openeditor_hint": {"zh": "关闭后显示缩略图，或按“原位编辑”设置处理。",
+                             "en": "When off, show a thumbnail or follow the in-place editing setting."},
+    "set_start_hidden": {"zh": "启动时隐藏主界面",
+                         "en": "Start with main window hidden"},
+    "set_start_hidden_hint": {"zh": "可从托盘或快捷键打开主界面。",
+                               "en": "Open the main window from the tray or a shortcut."},
+    "set_snap_windows": {"zh": "截图时吸附窗口",
+                         "en": "Snap to windows while capturing"},
+    "set_snap_windows_hint": {"zh": "悬停高亮窗口，单击选择窗口，拖动边缘对齐窗口边界。",
+                               "en": "Highlight windows on hover, click to select, and snap edges to their borders."},
     "p_ocr": {"zh": "识别文字 (O)", "en": "OCR text (O)"},
     "p_clickthrough": {"zh": "鼠标穿透", "en": "Click-through"},
     "p_reset_opacity": {"zh": "恢复不透明", "en": "Reset opacity"},
@@ -245,17 +255,22 @@ TR = {
                                "en": "Disable click-through on all pins"},
     "set_sc_hint": {"zh": "点击输入框后按组合键；清空可停用。快捷键由当前桌面管理。",
                     "en": "Click a field and press a key combo; clear to disable. Managed by your desktop."},
+    "set_sc_placeholder": {"zh": "按下快捷键", "en": "Press shortcut"},
     "set_sc_unavailable": {"zh": "当前桌面不支持在 Kapture 中直接注册全局快捷键；可在系统设置中绑定下列命令。",
                            "en": "This desktop cannot register shortcuts here; bind the commands in system settings."},
     "set_sc_duplicate": {"zh": "两个功能不能使用同一个快捷键。", "en": "Two actions cannot use the same shortcut."},
     "set_sc_invalid": {"zh": "此快捷键组合无法注册为全局快捷键。", "en": "This key combination cannot be registered globally."},
     "set_ocr_deflang": {"zh": "默认识别语言", "en": "Default OCR language"},
     "set_ocr_deflayout": {"zh": "默认版面", "en": "Default layout"},
-    "set_ocr_enh": {"zh": "图像增强（放大并保留字体细节）",
-                    "en": "Image enhance (upscale, preserve text detail)"},
-    "set_autoocr": {"zh": "截图后自动 OCR（打开编辑器并显示结果）",
-                    "en": "Run OCR after capture (open editor and show text)"},
-    "set_ocr_note": {"zh": "提示:中文需已安装对应 tesseract 语言包",
+    "set_ocr_enh": {"zh": "图像增强",
+                    "en": "Enhance OCR image"},
+    "set_ocr_enh_hint": {"zh": "放大截图并保留字体细节，以提升识别效果。",
+                          "en": "Upscale the image while preserving text detail for better recognition."},
+    "set_autoocr": {"zh": "截图后自动识别",
+                    "en": "Run OCR after capture"},
+    "set_autoocr_hint": {"zh": "识别结果在编辑器中显示；是否打开由“截图后打开编辑器”决定。",
+                          "en": "Show recognized text in the editor; the open-editor setting controls whether it appears."},
+    "set_ocr_note": {"zh": "提示：中文需安装对应的 Tesseract 语言包",
                      "en": "Note: install matching tesseract language data"},
     "set_fps": {"zh": "帧率 (fps)", "en": "Frame rate (fps)"},
     "set_gif": {"zh": "录屏同时导出 GIF", "en": "Also export GIF when recording"},
@@ -5741,19 +5756,27 @@ class MainWindow(QtWidgets.QWidget):
         cb_background.setChecked(s.value("start_hidden", False, type=bool))
         cb_snap = QtWidgets.QCheckBox(t("set_snap_windows"))
         cb_snap.setChecked(s.value("snap_windows", True, type=bool))
+        for cb, hint in ((cb_edit, "set_openeditor_hint"), (cb_inline, "set_inline_hint"),
+                         (cb_capture_keep_main, "set_capture_keep_main_hint"),
+                         (cb_background, "set_start_hidden_hint"), (cb_snap, "set_snap_windows_hint")):
+            cb.setToolTip(t(hint))
         for cb in (cb_copy, cb_save, cb_edit, cb_inline, cb_capture_keep_main, cb_background, cb_snap):
             gf.addRow(cb)
         tabs.addTab(g, t("tab_general"))
 
         # ---------- Shortcuts ---------- #
         k = QtWidgets.QWidget(); k.setObjectName("settingsPage"); kf = QtWidgets.QFormLayout(k)
-        kf.addRow(QtWidgets.QLabel(t("set_sc_hint")))
+        kf.setVerticalSpacing(8)
+        shortcut_hint = QtWidgets.QLabel(t("set_sc_hint"))
+        shortcut_hint.setWordWrap(True)
+        kf.addRow(shortcut_hint)
         run_sh = _run_sh_path()
         key_edits = {}
         cleared = set()      # rows whose ✕ was clicked: the only way to unbind
         for name, flag in SHORTCUT_ACTIONS:
             cmd_url = f"{run_sh} {flag}"
             kse = QtWidgets.QKeySequenceEdit()
+            kse.findChild(QtWidgets.QLineEdit).setPlaceholderText(t("set_sc_placeholder"))
             cur = (kde_current_key(cmd_url) if backend == "kde" else
                    gnome_current_key(flag) if backend == "gnome" else "")
             if cur:
@@ -5765,7 +5788,10 @@ class MainWindow(QtWidgets.QWidget):
                 kse.setKeySequence(QtGui.QKeySequence(DEFAULT_KEYS[flag]))
             clr = QtWidgets.QToolButton(); clr.setText("✕")
             clr.clicked.connect(lambda _, e=kse, f=flag: (e.clear(), cleared.add(f)))
-            row = QtWidgets.QHBoxLayout(); row.addWidget(kse); row.addWidget(clr)
+            row = QtWidgets.QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            row.addWidget(kse); row.addWidget(clr)
             rw = QtWidgets.QWidget(); rw.setLayout(row)
             kf.addRow(self._action_label(flag), rw)
             key_edits[flag] = (kse, cmd_url, name)
@@ -5792,9 +5818,11 @@ class MainWindow(QtWidgets.QWidget):
         if pi >= 0:
             psm.setCurrentIndex(pi)
         enh = QtWidgets.QCheckBox(t("set_ocr_enh"))
+        enh.setToolTip(t("set_ocr_enh_hint"))
         enh.setChecked(s.value("ocr_enhance", True, type=bool))
         of.addRow(t("set_ocr_deflang"), lang); of.addRow(t("set_ocr_deflayout"), psm); of.addRow(enh)
         cb_autoocr = QtWidgets.QCheckBox(t("set_autoocr"))
+        cb_autoocr.setToolTip(t("set_autoocr_hint"))
         cb_autoocr.setChecked(s.value("auto_ocr", True, type=bool))
         of.addRow(cb_autoocr)
         of.addRow(QtWidgets.QLabel(t("set_ocr_note")))
@@ -5806,6 +5834,7 @@ class MainWindow(QtWidgets.QWidget):
         rf.addWidget(record_options)
         rf.addWidget(QtWidgets.QLabel('每次录屏前可调整，结束后选择导出格式' if _LANG == 'zh'
                                       else 'Adjust before recording; choose the format after stopping'))
+        rf.addStretch(1)
         tabs.addTab(r, t("tab_record"))
 
         # ---------- Interface ---------- #

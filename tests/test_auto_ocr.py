@@ -81,7 +81,7 @@ class AutoOcrTest(unittest.TestCase):
     def test_auto_ocr_can_be_disabled_without_opening_editor(self):
         def disable_auto_ocr(dialog):
             checkbox = next(box for box in dialog.findChildren(QtWidgets.QCheckBox)
-                            if "OCR" in box.text())
+                            if box.text() == kapture.t("set_autoocr"))
             self.assertTrue(checkbox.isChecked())
             checkbox.setChecked(False)
             dialog.close()

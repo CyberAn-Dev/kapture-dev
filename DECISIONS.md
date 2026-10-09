@@ -9,6 +9,8 @@
 
 ## Settings on non-KDE desktops
 
+- Keep setting labels short; move optional behavior details into tooltips while retaining actual editor/in-place precedence. Shortcut row containers have zero inner margins and compact form spacing. Recording-page spare space belongs after the explanatory note, so resizing never separates it from the parameters.
+
 - General, OCR, recording, and interface settings remain available without KDE utilities. The shortcut page uses GNOME custom keybindings in GNOME sessions, KHotKeys in supported Plasma 5 sessions, and displays manual command lines elsewhere.
 - Menu cache refresh commands are optional; a missing KDE utility must not prevent saving unrelated settings.
 - The upstream `.deb` remains independent of this fork's source changes; a new package build is required to distribute the fix through `.deb`.

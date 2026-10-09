@@ -14,6 +14,8 @@
 
 ## Completed
 
+- Settings use concise checkbox labels, with necessary behavior explanations in tooltips and a localized shortcut placeholder. Shortcut rows omit duplicate container margins (43px pitch in native Qt); recording controls and their note stay grouped at the top, with spare space below. Verified Chinese/English at 560×470 and 560×650 in native Qt; 222 unit tests pass, including resized-layout checks and settings persistence.
+
 - OCR keeps Chinese line/paragraph boundaries and normal English word spacing; selected Chinese words no longer acquire spaces, and selecting across lines preserves line breaks. Enhancement now uses linear grayscale enlargement with dark-background inversion instead of denoising/forced thresholding; full text and word boxes use the same engine options without forced layout spaces. Verified on the reported original history screenshot: “可追溯” and “质检的文件” improve, but some Chinese glyph and clipped-edge errors remain. 219 unit tests pass; real Tesseract recognition and word boxes were checked on the original and a crop of complete text lines.
 
 - Long-capture icons now distinguish bidirectional manual capture and automatic up/down. Manual sampling waits 80ms rather than 250ms. Wide-frame matching first proposes row offsets at up to 320px horizontal width, validates original-size anchors/overlap and retries full width when needed. In isolated X11 with 1200×720 captures, identical up/down motion reduced preview latency from 329–432ms to 134–160ms with exact final pixels. Nine native fixed-header/footer/direction cases and 221 unit tests pass; these timing measurements are for this local fixture, not a guarantee for every scrolling application.

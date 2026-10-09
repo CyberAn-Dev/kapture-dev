@@ -58,6 +58,37 @@ class ThemeLayoutTest(unittest.TestCase):
         with mock.patch.object(QtWidgets.QDialog, "exec_", inspect):
             self.window.show_settings()
 
+    def test_shortcut_rows_and_recording_hint_stay_compact_when_resized(self):
+        def inspect(dialog):
+            dialog.show()
+            tabs = dialog.findChild(QtWidgets.QTabWidget)
+            for height in (470, 650):
+                dialog.resize(560, height)
+                tabs.setCurrentIndex(1)
+                self.app.processEvents()
+                scroll = tabs.widget(1)
+                edits = scroll.findChildren(QtWidgets.QKeySequenceEdit)
+                first = edits[0].mapTo(scroll, QtCore.QPoint(0, 0))
+                second = edits[1].mapTo(scroll, QtCore.QPoint(0, 0))
+                self.assertLessEqual(second.y() - first.y(), 44)
+                tabs.setCurrentIndex(3)
+                self.app.processEvents()
+                options = tabs.widget(3).findChild(kapture.RecordingOptions)
+                hint = next(label for label in tabs.widget(3).findChildren(QtWidgets.QLabel)
+                            if "每次录屏" in label.text())
+                options_bottom = options.mapTo(tabs.widget(3),
+                    QtCore.QPoint(0, options.height())).y()
+                self.assertLessEqual(hint.y() - options_bottom, 12)
+                preview_bottom = options.preview.mapTo(tabs.widget(3),
+                    QtCore.QPoint(0, options.preview.height())).y()
+                self.assertLessEqual(hint.y() - preview_bottom, 24)
+            dialog.reject()
+            return QtWidgets.QDialog.Rejected
+        with mock.patch.object(kapture, "shortcut_backend", return_value="gnome"), \
+                mock.patch.object(kapture, "gnome_current_key", return_value=""), \
+                mock.patch.object(QtWidgets.QDialog, "exec_", inspect):
+            self.window.show_settings()
+
     def test_default_width_keeps_output_menu_and_settings_visible(self):
         self.assertLessEqual(self.window.width(), 820)
         self.assertTrue(self.window.btn_save.isHidden())
