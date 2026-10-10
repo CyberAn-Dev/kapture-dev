@@ -294,8 +294,8 @@ TR = {
     "st_ocr_running": {"zh": "OCR 识别中……", "en": "Running OCR…"},
     "st_settings_saved": {"zh": "设置已保存", "en": "Settings saved"},
     "st_no_history": {"zh": "还没有历史截图", "en": "No history yet"},
-    "st_pinned": {"zh": "已钉到屏幕(拖动移动、滚轮缩放、双击关闭)",
-                  "en": "Pinned (drag to move, wheel to zoom, double-click to close)"},
+    "st_pinned": {"zh": "已钉到屏幕(滚轮缩放、拖动平移或移动、拖角改范围、双击关闭)",
+                  "en": "Pinned (wheel zooms, drag pans or moves, corners resize, double-click closes)"},
     "hist_title": {"zh": "历史截图", "en": "History"},
     "lab_ocr_pending": {"zh": "OCR 识别中，结果待图片打开后显示……",
                         "en": "OCR done — text shows when the image opens…"},
@@ -3364,17 +3364,27 @@ class FloatingThumbnail(QtWidgets.QWidget):
 # Pin image to screen (sticky image)
 # --------------------------------------------------------------------------- #
 class PinnedImage(QtWidgets.QWidget):
-    """Pin a screenshot as an always-on-top floating window: drag to move, wheel to zoom
-    (Ctrl+wheel adjusts opacity), double-click to close, right-click for actions
-    (copy / OCR / click-through / reset opacity)."""
+    """Pin a screenshot as an always-on-top floating window: the window is a fixed
+    viewport onto the image; wheel zooms the content inside it (anchored under the
+    cursor) and never resizes the window; when the content overflows the viewport a
+    left drag pans it (hand cursor), otherwise a left drag moves the window; the four
+    corner grips resize the viewport. Ctrl+wheel adjusts opacity, double-click closes,
+    right-click for actions (copy / OCR / click-through / reset opacity)."""
     _pins = []                                  # hold references to prevent GC
+    GRIP = 10                    # corner grip side (logical px) when shown
+    GRIP_HOT = 14                # hover/drag hotspot around each corner
+    MIN_VIEW = 60                # smallest viewport the grips can drag to
 
     def __init__(self, qimage, on_ocr=None, on_edit=None):
         super().__init__()
         PinnedImage._pins.append(self)
         self._orig = QtGui.QPixmap.fromImage(qimage)
         self._scale = 1.0
-        self._drag_off = None
+        self._offset = QtCore.QPoint(0, 0)      # content top-left in viewport coords
+        self._view = self._orig                 # _orig at current _scale
+        self._drag_off = None                   # window-move / pan delta
+        self._panning = False
+        self._grip = None                       # active corner: (dx, dy) in (-1, 1)
         self._on_ocr = on_ocr                   # callback(BGR numpy), MainWindow._pin_ocr
         self._on_edit = on_edit
         self._editing = False
@@ -3383,22 +3393,25 @@ class PinnedImage(QtWidgets.QWidget):
         self._click_through = False
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.setCursor(Qt.OpenHandCursor)
+        self.setMouseTracking(True)              # corner-grip hover in view mode
         self.setFocusPolicy(Qt.StrongFocus)      # so Esc reaches this frameless Tool window
-        # Initial size: no more than 60% of the screen
-        sg = QtWidgets.QApplication.primaryScreen().availableGeometry()
-        maxw, maxh = int(sg.width() * 0.6), int(sg.height() * 0.6)
-        if self._orig.width() > maxw or self._orig.height() > maxh:
-            self._scale = min(maxw / self._orig.width(),
-                              maxh / self._orig.height())
-        self._lbl = QtWidgets.QLabel(self)
-        self._lbl.setStyleSheet("border:1px solid #0a84ff;")
         self.canvas = AnnotateCanvas()
         self.canvas.setParent(self)
         self.canvas.set_image_bgr(qimage_to_bgr(qimage))
         self.canvas.hide()
         self.canvas.changed.connect(self._document_changed)
-        self._apply()
+        # Viewport starts fitted to the content as before (no more than 60% of the
+        # screen at 1:1); from then on only the corner grips change its size.
+        sg = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        maxw, maxh = int(sg.width() * 0.6), int(sg.height() * 0.6)
+        if self._orig.width() > maxw or self._orig.height() > maxh:
+            self._scale = min(maxw / self._orig.width(),
+                              maxh / self._orig.height())
+        self._update_view()
+        self.resize(self._view.size())           # viewport = content at first
+        self._clamp_offset()
         self.move(sg.center().x() - self.width() // 2,
                   sg.center().y() - self.height() // 2)
         self.show()
@@ -3460,7 +3473,6 @@ class PinnedImage(QtWidgets.QWidget):
                 'close', t('finish_edit'), lambda: self.set_editing(False))
             self.tools.action_button('copy', t('card_copy'), self._copy_image)
             self.tools.adjustSize()
-        self._lbl.setVisible(not editing)
         self.canvas.setVisible(editing)
         if self.tools:
             self.tools.setVisible(editing)
@@ -3488,22 +3500,41 @@ class PinnedImage(QtWidgets.QWidget):
         if self._on_edit:
             self._on_edit(self.canvas.snapshot_document())
 
-    def _apply(self):
-        pix = self._orig.scaled(
+    def _update_view(self):
+        """Re-scale the content cache for the current _scale (viewport untouched)."""
+        self._view = self._orig.scaled(
             max(1, int(self._orig.width() * self._scale)),
             max(1, int(self._orig.height() * self._scale)),
             Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._lbl.setPixmap(pix)
-        self._lbl.resize(pix.size())
+
+    def _clamp_offset(self):
+        """Keep content covering the viewport: never pan past the image edges;
+        center it when smaller than the viewport on that axis."""
+        x = min(0, max(self.width() - self._view.width(), self._offset.x()))
+        y = min(0, max(self.height() - self._view.height(), self._offset.y()))
+        if self._view.width() <= self.width():
+            x = (self.width() - self._view.width()) // 2
+        if self._view.height() <= self.height():
+            y = (self.height() - self._view.height()) // 2
+        self._offset = QtCore.QPoint(x, y)
+
+    def _can_pan(self):
+        return (self._view.width() > self.width() or
+                self._view.height() > self.height())
+
+    def _apply(self):
         if self._editing:
+            self._update_view()
             self.canvas.scale = self._scale
             self.canvas._apply_size()
-            self.canvas.move(0,0)
-            self.tools.move(0,self.canvas.height())
-            self.resize(max(self.canvas.size().width(),self.tools.width()),
-                        self.canvas.height()+self.tools.height())
+            self.canvas.move(0, 0)
+            self.tools.move(0, self.canvas.height())
+            self.resize(max(self.canvas.size().width(), self.tools.width()),
+                        self.canvas.height() + self.tools.height())
         else:
-            self.resize(pix.size())
+            self._update_view()
+            self._clamp_offset()
+            self.update()
         screen = QtGui.QGuiApplication.screenAt(self.frameGeometry().topLeft())
         if screen is None:
             screen = QtWidgets.QApplication.primaryScreen()
@@ -3514,27 +3545,126 @@ class PinnedImage(QtWidgets.QWidget):
             self.move(min(max(self.x(), available.left()), max_x),
                       min(max(self.y(), available.top()), max_y))
 
+    # --- viewport painting --- #
+
+    CORNERS = ((-1, -1), (1, -1), (-1, 1), (1, 1))   # tl tr bl br
+
+    def _grip_rects(self):
+        g, hw = self.GRIP, self.GRIP_HOT
+        pts = {(-1, -1): (0, 0), (1, -1): (self.width(), 0),
+               (-1, 1): (0, self.height()), (1, 1): (self.width(), self.height())}
+        return {c: QRect(x - hw, y - hw, 2 * hw, 2 * hw)
+                for c, (x, y) in pts.items()}
+
+    def _grip_at(self, pos):
+        for c, r in self._grip_rects().items():
+            if r.contains(pos):
+                return c
+        return None
+
+    def paintEvent(self, _):
+        p = QtGui.QPainter(self)
+        p.fillRect(self.rect(), Qt.black)       # letterbox / areas outside the canvas
+        if self._editing:
+            return                              # the canvas child paints on top
+        p.drawPixmap(self.rect(), self._view,
+                     QRect(-self._offset.x(), -self._offset.y(),
+                           self.width(), self.height()))
+        p.setPen(QtGui.QPen(QtGui.QColor('#0a84ff'), 1))
+        p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        hot = self._grip_at(self.mapFromGlobal(QtGui.QCursor.pos()))
+        if hot is not None:
+            g = self.GRIP
+            gx, gy = {(-1, -1): (0, 0), (1, -1): (self.width() - g, 0),
+                      (-1, 1): (0, self.height() - g),
+                      (1, 1): (self.width() - g, self.height() - g)}[hot]
+            p.fillRect(gx, gy, g, g, QtGui.QColor('#0a84ff'))
+            p.setPen(Qt.white)
+            p.drawRect(gx, gy, g - 1, g - 1)
+        p.end()
+
+    def _corner_cursor(self, corner):
+        dx, dy = corner
+        return {(-1, -1): Qt.SizeFDiagCursor, (1, 1): Qt.SizeFDiagCursor,
+                (1, -1): Qt.SizeBDiagCursor, (-1, 1): Qt.SizeBDiagCursor}[corner]
+
+    def mouseMoveEvent(self, e):
+        if self._editing:
+            return
+        if self._grip is not None:
+            self._resize_from_grip(e.pos())
+            return
+        if self._drag_off is not None:
+            top_left = e.globalPos() - self._drag_off
+            if self._panning:
+                dx = top_left.x() - self.x()
+                dy = top_left.y() - self.y()
+                self._offset += QtCore.QPoint(dx, dy)
+                self._clamp_offset()
+                self.update()
+            else:
+                self.move(top_left)
+            return
+        g = self._grip_at(e.pos())
+        if g is not None:
+            self.setCursor(self._corner_cursor(g))
+        elif self._can_pan():
+            self.setCursor(Qt.OpenHandCursor)
+        else:
+            self.setCursor(Qt.SizeAllCursor)
+        self.update()                            # refresh grip hover highlight
+
+    def _resize_from_grip(self, pos):
+        """Drag a corner: the opposite corner stays fixed on screen and the image
+        does not slide — moving the left/top edge shifts the window AND the pan
+        offset by the same delta, so screen pixels keep their content."""
+        dx, dy = self._grip
+        x, y, w, h = self.x(), self.y(), self.width(), self.height()
+        ox, oy = self._offset.x(), self._offset.y()
+        if dx < 0:
+            d = max(0, min(pos.x(), w - self.MIN_VIEW))
+            x, w, ox = x + d, w - d, ox - d
+        elif dx > 0:
+            w = max(self.MIN_VIEW, pos.x())
+        if dy < 0:
+            d = max(0, min(pos.y(), h - self.MIN_VIEW))
+            y, h, oy = y + d, h - d, oy - d
+        elif dy > 0:
+            h = max(self.MIN_VIEW, pos.y())
+        self._offset = QtCore.QPoint(ox, oy)
+        self.setGeometry(x, y, w, h)
+        self._clamp_offset()
+        self.update()
+
     def wheelEvent(self, e):
         if e.modifiers() & Qt.ControlModifier:
             self._nudge_opacity(e.angleDelta().y() > 0)
             return
+        pos = e.pos()
+        src = (pos - self._offset) / self._scale          # image point under cursor
         self._scale *= 1.1 if e.angleDelta().y() > 0 else 0.9
         self._scale = max(0.1, min(5.0, self._scale))
-        self._apply()
+        self._update_view()
+        self._offset = QtCore.QPoint(int(round(pos.x() - src.x() * self._scale)),
+                                     int(round(pos.y() - src.y() * self._scale)))
+        self._clamp_offset()
+        self.update()                            # viewport size is NOT touched here
 
     def mousePressEvent(self, e):
         if self._editing:
             return
         if e.button() == Qt.LeftButton:
+            self._grip = self._grip_at(e.pos())
+            if self._grip is not None:
+                return
             self._drag_off = e.globalPos() - self.frameGeometry().topLeft()
+            self._panning = self._can_pan()
             self.setCursor(Qt.ClosedHandCursor)
 
-    def mouseMoveEvent(self, e):
-        if self._drag_off is not None:
-            self.move(e.globalPos() - self._drag_off)
-
     def mouseReleaseEvent(self, e):
+        self._grip = None
         self._drag_off = None
+        self._panning = False
         self.setCursor(Qt.OpenHandCursor)
 
     def mouseDoubleClickEvent(self, e):
