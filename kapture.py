@@ -239,8 +239,8 @@ TR = {
                                "en": "Open the main window from the tray or a shortcut."},
     "set_snap_windows": {"zh": "截图时吸附窗口",
                          "en": "Snap to windows while capturing"},
-    "set_snap_windows_hint": {"zh": "悬停高亮窗口，单击选择窗口，拖动边缘对齐窗口边界。",
-                               "en": "Highlight windows on hover, click to select, and snap edges to their borders."},
+    "set_snap_windows_hint": {"zh": "悬停高亮窗口，单击选择整个窗口。",
+                               "en": "Highlight windows on hover, click to select a whole window."},
     "p_ocr": {"zh": "识别文字 (O)", "en": "OCR text (O)"},
     "p_clickthrough": {"zh": "鼠标穿透", "en": "Click-through"},
     "p_reset_opacity": {"zh": "恢复不透明", "en": "Reset opacity"},
@@ -865,26 +865,6 @@ def list_visible_windows():
         return []
 
 
-def snap_point(px, py, xs, ys, threshold=10):
-    """Snap (px, py) to the nearest guide within threshold on each axis.
-
-    Returns (snapped_x, snapped_y, hit_x, hit_y); hit_* is None when that axis did
-    not snap (used to draw guide lines only where a snap happened). During a free
-    corner drag the moving edges pass exactly through the cursor, so snapping the
-    cursor point is moving-edge snapping.
-    """
-    sx, hx = px, None
-    for gx in xs:
-        if abs(gx - px) <= threshold and (hx is None or abs(gx - px) < abs(hx - px)):
-            hx = gx
-    sy, hy = py, None
-    for gy in ys:
-        if abs(gy - py) <= threshold and (hy is None or abs(gy - py) < abs(hy - py)):
-            hy = gy
-    return (hx if hx is not None else px,
-            hy if hy is not None else py, hx, hy)
-
-
 def _x11_set_input_passthrough(win_id, passthrough):
     """XShape: an empty ShapeInput makes the window fully click-through;
     combining ShapeInput from Bounding restores normal input. Returns success."""
@@ -1300,7 +1280,6 @@ class RegionSelector(QtWidgets.QWidget):
 
     LOUPE = 120          # loupe side length (logical pixels)
     ZOOM = 8             # zoom factor
-    SNAP_T = 10          # edge-snap threshold (logical pixels)
 
     def __init__(self, mode="region", parent=None, keep_visible=False):
         super().__init__(parent)
@@ -1341,17 +1320,23 @@ class RegionSelector(QtWidgets.QWidget):
                                    QtGui.QImage.Format_RGB888).copy()
         self.bg_pix = QtGui.QPixmap.fromImage(self.bg_img)
         self.bg_pix.setDevicePixelRatio(self.dpr)
+        # Bake the dimming once: a full-screen alpha fillRect per mouse-move repaint
+        # is ~2x the per-frame pixel work at 4K and reads as drag stutter. The dimmed
+        # copy lets paintEvent cover the screen with a single opaque blit; sharp
+        # regions (hover/selection) are restored from bg_pix on top.
+        self.bg_dim = self.bg_pix.copy()
+        _p = QtGui.QPainter(self.bg_dim)
+        _p.fillRect(self.bg_dim.rect(), QtGui.QColor(0, 0, 0, 90))
+        _p.end()
 
         self.origin = None
         self.cur = QtCore.QPoint(0, 0)
-        # Window snapping (region mode): hover-highlight + click-select and edge guides
+        # Window assist (region mode): hover-highlight + click-to-select a window
         self.snap = QtCore.QSettings("ScrollShot", "ScrollShot").value(
             "snap_windows", True, type=bool)
         self._wins = None          # cached window rects (widget coords), filled on show
         self._hover = None         # hovered window rect (widget coords)
         self._press_pos = None
-        self._dragging = False
-        self._guides = None        # (xs, ys) snap targets built at drag start (not drawn)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -1393,9 +1378,9 @@ class RegionSelector(QtWidgets.QWidget):
 
     def paintEvent(self, _):
         p = QtGui.QPainter(self)
-        p.drawPixmap(0, 0, self.bg_pix)
-        # Semi-transparent dimming
-        p.fillRect(self.rect(), QtGui.QColor(0, 0, 0, 90))
+        # Single opaque blit of the pre-dimmed frame; the old per-paint full-screen
+        # dim pass (drawPixmap + alpha fillRect) halved the drag frame rate at 4K.
+        p.drawPixmap(0, 0, self.bg_dim)
         if _LANG == 'zh':
             hint=('拖动选择区域，Esc 取消' if self.mode=='region'
                   else '移动到目标像素，点击取色，Esc 取消')
@@ -1524,34 +1509,15 @@ class RegionSelector(QtWidgets.QWidget):
         self.origin = e.pos()
         self.cur = e.pos()
         self._press_pos = e.pos()
-        self._dragging = False
         if self.snap:
             # Recompute the hover target at the press point too (covers synthetic
             # events and presses without a preceding move on this widget)
             self._hover = self.hit_window(self._wins or [], e.pos())
-        if self.snap and self._wins is not None:
-            xs = [v for r in self._wins for v in (r.left(), r.right(), r.center().x())]
-            ys = [v for r in self._wins for v in (r.top(), r.bottom(), r.center().y())]
-            self._guides = (xs + [0, self.width(), self.origin.x()],
-                            ys + [0, self.height(), self.origin.y()])
         self.update()
 
     def mouseMoveEvent(self, e):
-        if self.mode == "region" and self.snap:
-            if self.origin is None:
-                self._hover = self.hit_window(self._wins or [], e.pos())
-            elif not self._dragging:
-                # Press never commits: past the threshold, it's a free region drag
-                if (e.pos() - self._press_pos).manhattanLength() > 4:
-                    self._dragging = True
-                    self._hover = None
-            if self._dragging and self._guides is not None:
-                px, py, _gx, _gy = snap_point(e.pos().x(), e.pos().y(),
-                                              self._guides[0], self._guides[1],
-                                              self.SNAP_T)
-                self.cur = QtCore.QPoint(px, py)
-                self.update()
-                return
+        if self.mode == "region" and self.snap and self.origin is None:
+            self._hover = self.hit_window(self._wins or [], e.pos())
         self.cur = e.pos()
         self.update()
 
@@ -1565,7 +1531,8 @@ class RegionSelector(QtWidgets.QWidget):
     def mouseReleaseEvent(self, e):
         if self.mode != "region" or self.origin is None:
             return
-        if not self._dragging and self._hover is not None:
+        dragged = (e.pos() - self._press_pos).manhattanLength() > 4
+        if not dragged and self._hover is not None:
             # Click without dragging: grab the hovered window whole (PixPin/Snipaste style)
             hv = self._hover
             gr = QRect(self.mapToGlobal(hv.topLeft()), hv.size()).intersected(self.geometry())
