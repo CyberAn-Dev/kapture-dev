@@ -1315,6 +1315,11 @@ class RegionSelector(QtWidgets.QWidget):
         # the selection from the frozen full-geometry frame.
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
                             Qt.X11BypassWindowManagerHint)
+        # paintEvent always fills the whole widget opaquely (the frozen bg_pix covers
+        # every pixel), so tell Qt to skip its pre-paint background clear. Without this
+        # the WM-bypassed full-desktop window clears + repaints at mouse-move rate,
+        # which reads as constant flicker across the whole screen.
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.setCursor(Qt.CrossCursor)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -1346,8 +1351,7 @@ class RegionSelector(QtWidgets.QWidget):
         self._hover = None         # hovered window rect (widget coords)
         self._press_pos = None
         self._dragging = False
-        self._guides = None        # (xs, ys) guide lines built at drag start
-        self._snap_lines = None    # [(vertical, coord)] drawn this frame
+        self._guides = None        # (xs, ys) snap targets built at drag start (not drawn)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -1438,14 +1442,9 @@ class RegionSelector(QtWidgets.QWidget):
             p.setPen(QtGui.QColor(255, 255, 255))
             p.drawText(r.left(), max(r.top() - 6, 12),
                        f"{r.width()} × {r.height()}")
-            # Magenta guide lines where edge-snapping kicked in
-            if self._snap_lines:
-                p.setPen(QtGui.QPen(QtGui.QColor(255, 0, 200, 180), 1))
-                for vertical, c in self._snap_lines:
-                    if vertical:
-                        p.drawLine(c, 0, c, self.height())
-                    else:
-                        p.drawLine(0, c, self.width(), c)
+            # Edge-snapping stays active (edges still align to window borders) but
+            # draws no full-span guide lines: a screen-wide magenta line did not
+            # identify which window edge it came from and flickered during drags.
 
         self._draw_loupe(p, self.cur)
 
@@ -1526,7 +1525,6 @@ class RegionSelector(QtWidgets.QWidget):
         self.cur = e.pos()
         self._press_pos = e.pos()
         self._dragging = False
-        self._snap_lines = None
         if self.snap:
             # Recompute the hover target at the press point too (covers synthetic
             # events and presses without a preceding move on this widget)
@@ -1548,12 +1546,10 @@ class RegionSelector(QtWidgets.QWidget):
                     self._dragging = True
                     self._hover = None
             if self._dragging and self._guides is not None:
-                px, py, gx, gy = snap_point(e.pos().x(), e.pos().y(),
-                                            self._guides[0], self._guides[1],
-                                            self.SNAP_T)
+                px, py, _gx, _gy = snap_point(e.pos().x(), e.pos().y(),
+                                              self._guides[0], self._guides[1],
+                                              self.SNAP_T)
                 self.cur = QtCore.QPoint(px, py)
-                self._snap_lines = [l for l in ((True, gx), (False, gy))
-                                    if l[1] is not None]
                 self.update()
                 return
         self.cur = e.pos()
