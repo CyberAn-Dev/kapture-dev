@@ -1,13 +1,13 @@
-# Kapture
+# KaPin
 
-> Kapture is a free, open-source (MIT) all-in-one screenshot, OCR, and screen-recording tool for Linux X11 desktops (Kubuntu, Ubuntu, KDE Plasma). It is written in Python with PyQt5 and bundles region/window capture, automatic scrolling long screenshots, on-image annotation, Tesseract-based Chinese & English OCR, screen recording (MP4/GIF), and pin-to-screen into a single tray app.
+> KaPin is a free, open-source (MIT) all-in-one screenshot, OCR, and screen-recording tool for Linux X11 desktops (Kubuntu, Ubuntu, KDE Plasma). It is written in Python with PyQt5 and bundles region/window capture, automatic scrolling long screenshots, on-image annotation, Tesseract-based Chinese & English OCR, screen recording (MP4/GIF), and pin-to-screen into a single tray app.
 
-## What Kapture does
+## What KaPin does
 
 - **Region capture**: drag a box to capture any part of the screen.
 - **Window capture**: click a window to capture it.
-- **Scrolling long screenshot (auto)**: Kapture auto-scrolls a target window and stitches frames into one tall, seamless image — ideal for web pages, chat logs, code, and documents.
-- **Scrolling long screenshot (manual)**: the user scrolls and Kapture stitches.
+- **Scrolling long screenshot (auto)**: KaPin auto-scrolls a target window and stitches frames into one tall, seamless image — ideal for web pages, chat logs, code, and documents.
+- **Scrolling long screenshot (manual)**: the user scrolls and KaPin stitches.
 - **OCR text recognition**: Tesseract-powered, recognizes Simplified Chinese, Traditional Chinese, and English; result is copied to the clipboard. Layout modes and image enhancement improve accuracy.
 - **Annotation**: rectangle, ellipse, arrow, line, pen, text, numbered steps, highlight, blur/mosaic (to hide sensitive info), magnifier, crop — with adjustable color and line width, undo, and clear.
 - **Screen recording**: export to MP4 or GIF with adjustable frame rate.
@@ -17,7 +17,7 @@
 
 ## Who it is for
 
-Linux users who want a single tool for screenshots with OCR and scrolling long-screenshot support. Kapture is a practical Linux alternative to Snipaste, ShareX, and Flameshot, and one of the few Linux scrolling-screenshot tools with built-in OCR.
+Linux users who want a single tool for screenshots with OCR and scrolling long-screenshot support. KaPin is a practical Linux alternative to Snipaste, ShareX, and Flameshot, and one of the few Linux scrolling-screenshot tools with built-in OCR.
 
 ## Requirements
 
@@ -28,7 +28,7 @@ Linux users who want a single tool for screenshots with OCR and scrolling long-s
 ## Install and run
 
 - Install: `git clone https://github.com/ycwei5/kapture.git && cd kapture && bash install.sh`
-- Run: launch "Kapture" from the application menu, or run `./run.sh`.
+- Run: launch "KaPin" from the application menu, or run `./run.sh`.
 - Direct actions: `./run.sh --region`, `--window`, `--scroll`, `--manual`, `--color`.
 
 ## Documentation

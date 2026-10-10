@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kapture 一键安装脚本(Kubuntu / Ubuntu, X11 会话)
+# KaPin 一键安装脚本(Kubuntu / Ubuntu, X11 会话)
 # 用法:bash install.sh
 set -e
 
@@ -30,7 +30,7 @@ mkdir -p "$APP_DIR"
 cat > "$APP_DIR/kapture.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Kapture
+Name=KaPin
 GenericName=Screenshot / OCR / Recording
 Comment=Scrolling screenshot, OCR, annotation and recording
 Exec=$DIR/run.sh
@@ -43,4 +43,4 @@ EOF
 update-desktop-database "$APP_DIR" 2>/dev/null || true
 
 echo ""
-echo "✅ 安装完成!在应用菜单搜 'Kapture' 打开,或运行: $DIR/run.sh"
+echo "✅ 安装完成!在应用菜单搜 'KaPin' 打开,或运行: $DIR/run.sh"

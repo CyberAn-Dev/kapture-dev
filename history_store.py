@@ -1,4 +1,4 @@
-"""Small persistent store for Kapture's recent image histories."""
+"""Small persistent store for KaPin's recent image histories."""
 
 import json
 import os

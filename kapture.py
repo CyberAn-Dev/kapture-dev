@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Kapture -- screenshot / OCR / recording tool for X11 (KDE).
+"""KaPin -- screenshot / OCR / recording tool for X11 (KDE).
 
 Features:
   - Region / window / auto-scroll / manual-scroll capture
@@ -165,12 +165,12 @@ TR = {
     "save_failed": {"zh":"保存失败，请选择可写入的路径", "en":"Save failed; choose a writable path"},
     "set_capture_keep_main": {"zh": "截图时保留主界面",
                               "en": "Keep main window during capture"},
-    "set_capture_keep_main_hint": {"zh": "保留 Kapture 主界面，可将本工具截入截图。",
-                                    "en": "Keep Kapture visible so it can be included in a screenshot."},
+    "set_capture_keep_main_hint": {"zh": "保留 KaPin 主界面，可将本工具截入截图。",
+                                    "en": "Keep KaPin visible so it can be included in a screenshot."},
     "clear_history": {"zh":"清空截图与剪贴板图片历史", "en":"Clear screenshot and clipboard image history"},
 
-    "app_title": {"zh": "Kapture", "en": "Kapture"},
-    "app_name": {"zh": "Kapture", "en": "Kapture"},
+    "app_title": {"zh": "KaPin", "en": "KaPin"},
+    "app_name": {"zh": "KaPin", "en": "KaPin"},
     "app_generic": {"zh": "截图 / OCR / 录屏", "en": "Screenshot / OCR / Recording"},
     "app_comment": {"zh": "滚动截图、OCR 文字识别、标注与录屏",
                     "en": "Scrolling screenshot, OCR, annotation and recording"},
@@ -219,10 +219,10 @@ TR = {
     "ocr_enhance": {"zh": "图像增强", "en": "Image enhance"},
     # Tray
     "tray_show": {"zh": "显示主窗口", "en": "Show main window"},
-    "tray_quit": {"zh": "退出 Kapture", "en": "Quit Kapture"},
-    "tray_tip": {"zh": "Kapture — 截图 / OCR / 录屏", "en": "Kapture — Capture / OCR / Record"},
+    "tray_quit": {"zh": "退出 KaPin", "en": "Quit KaPin"},
+    "tray_tip": {"zh": "KaPin — 截图 / OCR / 录屏", "en": "KaPin — Capture / OCR / Record"},
     # Settings
-    "set_title": {"zh": "Kapture 设置", "en": "Kapture Settings"},
+    "set_title": {"zh": "KaPin 设置", "en": "KaPin Settings"},
     "tab_general": {"zh": "常规", "en": "General"},
     "tab_shortcuts": {"zh": "快捷键", "en": "Shortcuts"},
     "tab_ocr": {"zh": "OCR", "en": "OCR"},
@@ -249,7 +249,7 @@ TR = {
     "set_sc_hint": {"zh": "点击输入框后按组合键；清空可停用。快捷键由当前桌面管理。",
                     "en": "Click a field and press a key combo; clear to disable. Managed by your desktop."},
     "set_sc_placeholder": {"zh": "按下快捷键", "en": "Press shortcut"},
-    "set_sc_unavailable": {"zh": "当前桌面不支持在 Kapture 中直接注册全局快捷键；可在系统设置中绑定下列命令。",
+    "set_sc_unavailable": {"zh": "当前桌面不支持在 KaPin 中直接注册全局快捷键；可在系统设置中绑定下列命令。",
                            "en": "This desktop cannot register shortcuts here; bind the commands in system settings."},
     "set_sc_duplicate": {"zh": "两个功能不能使用同一个快捷键。", "en": "Two actions cannot use the same shortcut."},
     "set_sc_invalid": {"zh": "此快捷键组合无法注册为全局快捷键。", "en": "This key combination cannot be registered globally."},
@@ -680,7 +680,7 @@ def gnome_current_key(flag):
 
 
 def gnome_set_shortcuts(entries):
-    """Update only Kapture's GNOME shortcuts; preserve unrelated custom shortcuts.
+    """Update only KaPin's GNOME shortcuts; preserve unrelated custom shortcuts.
 
     Entries are ``(name, flag, command, key)`` or ``(name, flag, command, key,
     explicit_clear)``. An empty key keeps a stored binding and re-registers it:
@@ -695,7 +695,7 @@ def gnome_set_shortcuts(entries):
         path = _gnome_path(flag)
         schema = f"{GNOME_CUSTOM_SCHEMA}:{path}"
         if key:
-            _gsettings("set", schema, "name", repr("Kapture: " + name))
+            _gsettings("set", schema, "name", repr("KaPin: " + name))
             _gsettings("set", schema, "command", repr(command))
             _gsettings("set", schema, "binding", repr(key))
             if path not in paths:
@@ -761,8 +761,8 @@ def kde_set_shortcut(name, cmd_url, key, uuid):
             return
         idx = dc + 1
         b = f"Data_{idx}"
-        _kwrite(b, "Comment", f"Kapture {name}")
-        _kwrite(b, "Name", f"Kapture: {name}")
+        _kwrite(b, "Comment", f"KaPin {name}")
+        _kwrite(b, "Name", f"KaPin: {name}")
         _kwrite(b, "Enabled", "true")
         _kwrite(b, "Type", "SIMPLE_ACTION_DATA")
         _kwrite(b + "Actions", "ActionsCount", "1")
@@ -3492,7 +3492,7 @@ class PinnedImage(QtWidgets.QWidget):
         QtWidgets.QApplication.clipboard().setImage(self.canvas.render_flattened())
 
     def _save_image(self):
-        path,_=QtWidgets.QFileDialog.getSaveFileName(self,t('dlg_save'),'Kapture.png','PNG (*.png);;JPEG (*.jpg)')
+        path,_=QtWidgets.QFileDialog.getSaveFileName(self,t('dlg_save'),'KaPin.png','PNG (*.png);;JPEG (*.jpg)')
         if path and not self.canvas.render_flattened().save(path):
             QtWidgets.QMessageBox.warning(self,t('dlg_save'),t('save_failed'))
 
@@ -4350,7 +4350,7 @@ class MainWindow(QtWidgets.QWidget):
         # activation), and Qt suppresses hover tooltips on inactive windows —
         # without this, tooltips only appear after clicking into the window.
         self.setAttribute(Qt.WA_AlwaysShowToolTips)
-        self.setWindowTitle("Kapture")
+        self.setWindowTitle("KaPin")
         self.resize(820, 660)
         self.image_bgr = None        # current screenshot (BGR numpy)
         self.worker = None
@@ -5554,7 +5554,7 @@ class MainWindow(QtWidgets.QWidget):
     def _ensure_default_shortcuts(self):
         """Self-heal the GNOME shortcut registration (startup + one delayed retry).
 
-        Something outside Kapture keeps emptying the master custom-keybindings
+        Something outside KaPin keeps emptying the master custom-keybindings
         array around login, which silently kills every shortcut even though the
         per-action bindings stay stored (the recurring "Alt+` works only after
         opening settings" symptom: saving in settings re-registers the paths).
@@ -5591,7 +5591,7 @@ class MainWindow(QtWidgets.QWidget):
     def _make_filename(self):
         """Build a filename from the template; supports {date}{time}{n}."""
         import datetime
-        tmpl = self.settings.value("name_tmpl", "Kapture_{date}_{time}")
+        tmpl = self.settings.value("name_tmpl", "KaPin_{date}_{time}")
         now = datetime.datetime.now()
         n = int(self.settings.value("counter", 0, type=int)) + 1
         self.settings.setValue("counter", n)
@@ -5930,7 +5930,7 @@ class MainWindow(QtWidgets.QWidget):
             QtWidgets.QFileDialog.getExistingDirectory(dlg, t("dlg_savedir")) or save_dir.text()))
         hb = QtWidgets.QHBoxLayout(); hb.addWidget(save_dir); hb.addWidget(browse)
         gf.addRow(t("set_savedir"), hb)
-        tmpl = QtWidgets.QLineEdit(s.value("name_tmpl", "Kapture_{date}_{time}"))
+        tmpl = QtWidgets.QLineEdit(s.value("name_tmpl", "KaPin_{date}_{time}"))
         tmpl.setToolTip("{date} {time} {n}")
         gf.addRow(t("set_tmpl"), tmpl)
         cb_copy = QtWidgets.QCheckBox(t("set_autocopy")); cb_copy.setChecked(s.value("auto_copy", True, type=bool))
@@ -6418,7 +6418,7 @@ def main():
     import argparse
     from PyQt5.QtNetwork import QLocalServer, QLocalSocket
     parser = argparse.ArgumentParser(
-        description="Kapture -- scrolling screenshot + OCR + annotation")
+        description="KaPin -- scrolling screenshot + OCR + annotation")
     parser.add_argument("--region", action="store_true", help="go straight to region capture on launch")
     parser.add_argument("--manual", action="store_true", help="go straight to manual scrolling capture on launch")
     parser.add_argument("--scroll", action="store_true", help="go straight to auto scrolling capture on launch")
@@ -6456,7 +6456,7 @@ def main():
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("Kapture")
-    app.setApplicationDisplayName("Kapture")
+    app.setApplicationDisplayName("KaPin")
     app.setDesktopFileName("kapture")            # associate the taskbar entry with kapture.desktop
     import os as _os
     if _os.path.exists(_icon_path()):
@@ -6484,7 +6484,7 @@ def main():
         msg = "".join(traceback.format_exception(etype, evalue, tb))
         sys.stderr.write(msg)
         try:
-            QtWidgets.QMessageBox.critical(None, "Kapture", str(evalue))
+            QtWidgets.QMessageBox.critical(None, "KaPin", str(evalue))
         except Exception:                            # noqa: BLE001
             pass
     sys.excepthook = _excepthook

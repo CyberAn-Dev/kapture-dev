@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="kapture.png" alt="Kapture Dev" width="88" />
+<img src="kapture.png" alt="KaPin" width="88" />
 
-# Kapture Dev
+# KaPin
 
 **An open-source PixPin alternative for Linux X11**
 
@@ -19,7 +19,7 @@ Capture, annotate, extract text, and keep visual references at hand in one X11 w
 
 <div align="center">
 
-<img src="docs/images/editor.png" alt="Kapture Dev editor" width="900" />
+<img src="docs/images/editor.png" alt="KaPin editor" width="900" />
 
 <sub>Full editor with annotations, OCR results, and the output menu. Screenshots use sample content.</sub>
 
@@ -95,13 +95,13 @@ Upstream [releases](https://github.com/ycwei5/kapture/releases) contain the upst
 
 <div align="center">
 
-<img src="docs/images/settings.png" alt="Kapture Dev settings" width="560" />
+<img src="docs/images/settings.png" alt="KaPin settings" width="560" />
 
 <sub>Configure shortcuts, capture behavior, OCR and recording defaults, and appearance.</sub>
 
 </div>
 
-GNOME restores saved Kapture shortcuts at startup. Change conflicting combinations in Settings. Background launch hides the window; it does not enable login autostart.
+GNOME restores saved KaPin shortcuts at startup. Change conflicting combinations in Settings. Background launch hides the window; it does not enable login autostart.
 
 </details>
 
@@ -118,7 +118,7 @@ GNOME restores saved Kapture shortcuts at startup. Change conflicting combinatio
 
 Captures always open in-place editing: Enter copies, Esc cancels, and **Open in editor** hands the image to the full editor. Right-click a pin to annotate or select text; restore click-through pins from the tray.
 
-To capture Kapture itself, enable **Keep main window during capture** in **Settings → General**. Capture shortcuts also work while Settings is open and preserve unsaved changes.
+To capture KaPin itself, enable **Keep main window during capture** in **Settings → General**. Capture shortcuts also work while Settings is open and preserve unsaved changes.
 
 Scroll speed lives in the scrolling-capture menu; screenshot delay lives in the capture menu. Recording has its own frame rate, resolution, countdown, and duration controls, followed by format selection after capture.
 
@@ -133,7 +133,7 @@ Run one action with `./run.sh <option>`, for example `./run.sh --region`.
 
 ## How it differs from PixPin
 
-Kapture Dev is an independent open-source fork of [Kapture](https://github.com/ycwei5/kapture), not affiliated with [PixPin](https://pixpin.cn/). It is a focused Linux X11 replacement for PixPin's everyday screenshot workflow: inline editing, OCR, scrolling capture, pinning, and recording are available in one app, while the overall feature set is narrower. OCR translation, QR recognition, and recording audio are not currently provided.
+KaPin is an independent open-source project, originally based on [Kapture](https://github.com/ycwei5/kapture), and is not affiliated with [PixPin](https://pixpin.cn/). It is a focused Linux X11 replacement for PixPin's everyday screenshot workflow: inline editing, OCR, scrolling capture, pinning, and recording are available in one app, while the overall feature set is narrower. OCR translation, QR recognition, and recording audio are not currently provided.
 
 - X11 only; Wayland is not supported. In-app global shortcut setup is available on GNOME and KDE Plasma 5.
 - Scrolling capture is limited to 40,000 pixels in height. Dynamic pages, overlays, lazy loading, and repeated content can affect alignment; it is not a browser full-page export.

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="kapture.png" alt="Kapture Dev" width="88" />
+<img src="kapture.png" alt="KaPin" width="88" />
 
-# Kapture Dev
+# KaPin
 
 **Linux X11 上的 PixPin 平替**
 
@@ -19,7 +19,7 @@
 
 <div align="center">
 
-<img src="docs/images/editor.png" alt="Kapture Dev 编辑器" width="900" />
+<img src="docs/images/editor.png" alt="KaPin 编辑器" width="900" />
 
 <sub>完整编辑器：标注工具、OCR 结果与输出菜单。截图使用演示内容。</sub>
 
@@ -95,7 +95,7 @@ sudo apt install ./dist/kapture_1.1.0_all.deb
 
 <div align="center">
 
-<img src="docs/images/settings.png" alt="Kapture Dev 设置" width="560" />
+<img src="docs/images/settings.png" alt="KaPin 设置" width="560" />
 
 <sub>配置快捷键、截图行为、OCR 与录屏默认值，以及界面外观。</sub>
 
@@ -118,7 +118,7 @@ GNOME 启动时恢复已保存的快捷键，有冲突可在设置中修改。�
 
 截图后固定进入原位编辑；Enter 复制、Esc 取消，工具条中的“在编辑器打开”可进入完整编辑器。钉图右键可选“标注 / 编辑”或“选取文字”，鼠标穿透后从托盘恢复。
 
-需要截取 Kapture 自身时，在「设置 → 常规」勾选「截图时保留主界面」。设置窗口打开时也可用截图快捷键截取它，未保存的设置会保留。
+需要截取 KaPin 自身时，在「设置 → 常规」勾选「截图时保留主界面」。设置窗口打开时也可用截图快捷键截取它，未保存的设置会保留。
 
 长截图的滚速位于长截图下拉菜单；截图延时位于截图菜单。录屏使用独立的帧率、分辨率、倒计时和时长设置，结束后再选择输出格式。
 
@@ -133,7 +133,7 @@ GNOME 启动时恢复已保存的快捷键，有冲突可在设置中修改。�
 
 ## 与 PixPin 的区别
 
-Kapture Dev 是基于 [Kapture](https://github.com/ycwei5/kapture) 的独立开源项目，与 [PixPin](https://pixpin.cn/) 无隶属关系。它是面向 Linux X11 的 PixPin 日常截图工作流平替：原位编辑、OCR、长截图、钉图和录屏集中在一个应用中，但整体功能范围更窄。目前不提供 OCR 翻译、二维码识别或录屏音频。
+KaPin 是基于 [Kapture](https://github.com/ycwei5/kapture) 衍生的独立开源项目，与 [PixPin](https://pixpin.cn/) 无隶属关系。它是面向 Linux X11 的 PixPin 日常截图工作流平替：原位编辑、OCR、长截图、钉图和录屏集中在一个应用中，但整体功能范围更窄。目前不提供 OCR 翻译、二维码识别或录屏音频。
 
 - 仅支持 X11，暂不支持 Wayland。GNOME 和 KDE Plasma 5 支持在应用内设置全局快捷键。
 - 长截图高度上限为 40,000 像素。动态页面、悬浮层、懒加载和重复内容会影响拼接；本功能不是浏览器整页导出。
